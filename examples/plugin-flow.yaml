@@ -1,0 +1,40 @@
+version: "0.1"
+
+metadata:
+  name: External Plugin Flow
+  description: Demonstrates using an external node plugin
+
+nodes:
+  - id: inject
+    type: core.inject
+    config:
+      payload: "hello world"
+      interval_ms: 2000
+      on_start: true
+      repeat: true
+
+  # External echo node from the plugin
+  - id: echo
+    type: example.echo
+    config:
+      prefix: ">>> "
+      suffix: " <<<"
+      uppercase: true
+
+  # External counter node from the plugin
+  - id: counter
+    type: example.counter
+    config:
+      start: 0
+
+  - id: debug
+    type: core.debug
+    name: "Output"
+
+wires:
+  - from: inject
+    to: echo
+  - from: echo
+    to: counter
+  - from: counter
+    to: debug

@@ -1,0 +1,96 @@
+version: "0.1"
+
+metadata:
+  name: Advanced Flow Example
+  description: Demonstrates switch, change, delay, filter, split, join, and template nodes
+
+nodes:
+  # Inject an array to demonstrate split/join
+  - id: inject_array
+    type: core.inject
+    config:
+      payload:
+        items: ["apple", "banana", "cherry", "date"]
+        category: "fruits"
+      interval_ms: 5000
+      on_start: true
+      repeat: true
+
+  # Extract the items array using change node
+  - id: extract_items
+    type: core.change
+    config:
+      rules:
+        - action: copy
+          from: payload.items
+          property: context.original_category
+        - action: copy
+          from: payload.category
+          property: context.category
+        - action: set
+          property: payload
+          value: null
+
+  # Script to set payload to items
+  - id: set_items
+    type: core.script
+    config:
+      code: |
+        msg.payload = ["apple", "banana", "cherry", "date"];
+        return msg;
+
+  # Split the array into individual messages
+  - id: split_items
+    type: core.split
+    config:
+      split_on: array
+      add_parts: true
+
+  # Filter out items starting with 'b'
+  - id: filter_b
+    type: core.filter
+    config:
+      condition: |
+        payload.charAt(0) !== 'b'
+
+  # Add delay to simulate processing
+  - id: process_delay
+    type: core.delay
+    config:
+      delay_ms: 100
+
+  # Transform each item using template
+  - id: format_item
+    type: core.template
+    config:
+      template: "Fruit: {{.payload}} (item {{index .metadata \"split_index\"}} of {{index .metadata \"split_total\"}})"
+      output: payload
+
+  # Join back into array
+  - id: join_items
+    type: core.join
+    config:
+      mode: auto
+      join_as: array
+      timeout_ms: 3000
+
+  # Debug output
+  - id: debug_output
+    type: core.debug
+    name: "Final Output"
+
+wires:
+  - from: inject_array
+    to: set_items
+  - from: set_items
+    to: split_items
+  - from: split_items
+    to: filter_b
+  - from: filter_b
+    to: process_delay
+  - from: process_delay
+    to: format_item
+  - from: format_item
+    to: join_items
+  - from: join_items
+    to: debug_output

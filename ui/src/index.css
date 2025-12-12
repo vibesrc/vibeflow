@@ -1,0 +1,278 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Industrial Control Room Theme - SCADA/Mission Control Aesthetic */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('https://fonts.gstatic.com/s/jetbrainsmono/v18/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjPVmUsaaDhw.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('https://fonts.gstatic.com/s/jetbrainsmono/v18/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjDFqUsaaDhw.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* Custom industrial colors */
+  --color-amber: var(--amber);
+  --color-cyan: var(--cyan);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+/* Industrial Dark Theme - Always dark like a control room */
+:root {
+  --radius: 4px;
+  /* Deep charcoal background - like industrial panels */
+  --background: oklch(0.12 0.005 260);
+  --foreground: oklch(0.92 0.01 90);
+
+  /* Card panels with subtle warmth */
+  --card: oklch(0.16 0.008 260);
+  --card-foreground: oklch(0.92 0.01 90);
+
+  --popover: oklch(0.18 0.01 260);
+  --popover-foreground: oklch(0.92 0.01 90);
+
+  /* Primary: Amber - like warning lights and indicators */
+  --primary: oklch(0.78 0.18 75);
+  --primary-foreground: oklch(0.12 0.005 260);
+
+  /* Secondary: Cool slate */
+  --secondary: oklch(0.22 0.015 260);
+  --secondary-foreground: oklch(0.85 0.01 90);
+
+  --muted: oklch(0.2 0.01 260);
+  --muted-foreground: oklch(0.6 0.02 90);
+
+  /* Accent: Cyan - like digital readouts */
+  --accent: oklch(0.75 0.15 195);
+  --accent-foreground: oklch(0.12 0.005 260);
+
+  --destructive: oklch(0.65 0.25 25);
+  --border: oklch(0.28 0.02 260);
+  --input: oklch(0.2 0.01 260);
+  --ring: oklch(0.78 0.18 75);
+
+  /* Status colors */
+  --amber: oklch(0.78 0.18 75);
+  --cyan: oklch(0.75 0.15 195);
+  --success: oklch(0.7 0.2 145);
+  --warning: oklch(0.78 0.18 75);
+  --danger: oklch(0.65 0.25 25);
+
+  /* Charts - industrial palette */
+  --chart-1: oklch(0.78 0.18 75);
+  --chart-2: oklch(0.75 0.15 195);
+  --chart-3: oklch(0.7 0.2 145);
+  --chart-4: oklch(0.65 0.25 25);
+  --chart-5: oklch(0.7 0.15 280);
+
+  /* Sidebar - slightly darker panel */
+  --sidebar: oklch(0.1 0.005 260);
+  --sidebar-foreground: oklch(0.85 0.01 90);
+  --sidebar-primary: oklch(0.78 0.18 75);
+  --sidebar-primary-foreground: oklch(0.12 0.005 260);
+  --sidebar-accent: oklch(0.18 0.01 260);
+  --sidebar-accent-foreground: oklch(0.92 0.01 90);
+  --sidebar-border: oklch(0.25 0.015 260);
+  --sidebar-ring: oklch(0.78 0.18 75);
+}
+
+/* Grid pattern overlay for industrial feel */
+.grid-pattern {
+  background-image:
+    linear-gradient(oklch(0.25 0.015 260 / 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.25 0.015 260 / 0.5) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Scanline effect for retro-industrial aesthetic */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    oklch(0 0 0 / 0.03) 2px,
+    oklch(0 0 0 / 0.03) 4px
+  );
+  pointer-events: none;
+}
+
+/* Glow effects for active elements */
+.glow-amber {
+  box-shadow: 0 0 20px oklch(0.78 0.18 75 / 0.3);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 20px oklch(0.75 0.15 195 / 0.3);
+}
+
+.glow-success {
+  box-shadow: 0 0 15px oklch(0.7 0.2 145 / 0.4);
+}
+
+.glow-danger {
+  box-shadow: 0 0 15px oklch(0.65 0.25 25 / 0.4);
+}
+
+/* Status indicator animations */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* React Flow overrides for industrial theme */
+.react-flow__edge-path {
+  stroke: oklch(0.5 0.08 260);
+  stroke-width: 2;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: oklch(0.78 0.18 75);
+  stroke-width: 3;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: oklch(0.78 0.18 75);
+  stroke-width: 3;
+}
+
+.react-flow__connection-line {
+  stroke: oklch(0.78 0.18 75);
+  stroke-width: 2;
+  stroke-dasharray: 5, 5;
+}
+
+/* Make edges selectable */
+.react-flow__edge {
+  cursor: pointer;
+}
+
+/* React Flow controls styling */
+.react-flow__controls {
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
+}
+
+.react-flow__controls-button {
+  background: oklch(0.18 0.01 260);
+  border-color: oklch(0.28 0.02 260);
+  color: oklch(0.85 0.01 90);
+}
+
+.react-flow__controls-button:hover {
+  background: oklch(0.22 0.015 260);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+/* React Flow minimap styling */
+.react-flow__minimap {
+  box-shadow: 0 4px 12px oklch(0 0 0 / 0.3);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-mono antialiased;
+    font-feature-settings: 'liga' 1, 'calt' 1;
+  }
+
+  /* Buttons should have pointer cursor */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Scrollbar styling for industrial feel */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: oklch(0.12 0.005 260);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.3 0.02 260);
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.4 0.02 260);
+  }
+}
+
+/* Input focus states with industrial glow */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: oklch(0.78 0.18 75) !important;
+  box-shadow: 0 0 0 2px oklch(0.78 0.18 75 / 0.2);
+}
+
+/* Button hover states */
+button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* Text selection */
+::selection {
+  background: oklch(0.78 0.18 75 / 0.3);
+  color: oklch(0.95 0.01 90);
+}

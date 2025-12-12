@@ -1,0 +1,1 @@
+- all ts/js files should be kebab-case

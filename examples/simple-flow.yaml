@@ -1,0 +1,37 @@
+version: "0.1"
+
+metadata:
+  name: Simple Test Flow
+  description: A basic flow to test the runtime
+
+nodes:
+  - id: inject1
+    type: core.inject
+    config:
+      payload:
+        message: "Hello, Vibeflow!"
+        count: 0
+      interval_ms: 2000
+      on_start: true
+      repeat: true
+
+  - id: script1
+    type: core.script
+    config:
+      code: |
+        // Increment the counter
+        if (typeof msg.payload.count === 'number') {
+          msg.payload.count++;
+        }
+        msg.payload.processed_at = new Date().toISOString();
+        return msg;
+
+  - id: debug1
+    type: core.debug
+    name: "Output"
+
+wires:
+  - from: inject1
+    to: script1
+  - from: script1
+    to: debug1

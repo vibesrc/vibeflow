@@ -30,3 +30,15 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+/vibeflow
+/vibeflow-server
+
+# Node.js
+node_modules/
+
+# Runtime files
+.vibeflow.pid
+data/
+.db
+.sqlite

@@ -1,0 +1,68 @@
+version: "0.1"
+
+metadata:
+  name: Switch Example
+  description: Demonstrates routing messages based on conditions
+
+nodes:
+  - id: inject
+    type: core.inject
+    config:
+      payload:
+        value: 0
+      interval_ms: 1000
+      on_start: true
+      repeat: true
+
+  # Increment counter using script (stateful to persist counter)
+  - id: counter
+    type: core.script
+    config:
+      stateful: true
+      code: |
+        if (!globalThis.counter) globalThis.counter = 0;
+        globalThis.counter++;
+        msg.payload = { value: globalThis.counter };
+        return msg;
+
+  # Route based on value
+  - id: router
+    type: core.switch
+    config:
+      property: payload.value
+      check_all: false
+      default: other
+      rules:
+        - condition: "value <= 3"
+          output: low
+        - condition: "value > 3 && value <= 6"
+          output: medium
+        - condition: "value > 6"
+          output: high
+
+  - id: debug_low
+    type: core.debug
+    name: "LOW"
+
+  - id: debug_medium
+    type: core.debug
+    name: "MEDIUM"
+
+  - id: debug_high
+    type: core.debug
+    name: "HIGH"
+
+wires:
+  - from: inject
+    to: counter
+  - from: counter
+    to: router
+  - from: router
+    to: debug_low
+    output: low
+  - from: router
+    to: debug_medium
+    output: medium
+  - from: router
+    to: debug_high
+    output: high
