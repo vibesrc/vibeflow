@@ -16,8 +16,8 @@ func init() {
 		Name:        "Debug",
 		Description: "Logs messages for debugging",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to debug"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Pass-through message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to debug"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Pass-through message"}},
 		Config: []node.ConfigSpec{
 			{Name: "complete", Type: "bool", Default: false, Description: "Log complete message (vs just payload)"},
 		},
@@ -30,9 +30,10 @@ type DebugNode struct {
 	name     string
 	complete bool // Log complete message vs just payload
 	logger   *slog.Logger
+	output   node.Output
 }
 
-func (n *DebugNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *DebugNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.name = cfg.Name
 	if n.name == "" {
@@ -40,10 +41,20 @@ func (n *DebugNode) Init(ctx context.Context, cfg *node.Config) error {
 	}
 	n.complete = cfg.GetBool("complete", false)
 	n.logger = slog.Default()
+
+	// Output is optional - debug is often a terminal node
+	if outputs.Has("default") {
+		var err error
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *DebugNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *DebugNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	if n.complete {
 		// Log complete message
 		data, _ := json.MarshalIndent(msg, "", "  ")
@@ -66,8 +77,10 @@ func (n *DebugNode) Process(ctx context.Context, msg *message.Message, emit node
 		fmt.Printf("[%s] %s\n", n.name, payloadStr)
 	}
 
-	// Pass message through
-	emit.Emit("default", msg)
+	// Pass message through if output is wired
+	if n.output != nil {
+		n.output.Send(msg)
+	}
 	return nil
 }
 

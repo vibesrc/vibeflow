@@ -15,8 +15,8 @@ func init() {
 		Name:        "Change",
 		Description: "Modifies message properties",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to modify"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Modified message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to modify"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Modified message"}},
 		Config: []node.ConfigSpec{
 			{
 				Name:        "rules",
@@ -36,8 +36,9 @@ func init() {
 
 // ChangeNode modifies message properties.
 type ChangeNode struct {
-	id    string
-	rules []changeRule
+	id     string
+	rules  []changeRule
+	output node.Output
 }
 
 type changeRule struct {
@@ -47,7 +48,7 @@ type changeRule struct {
 	from     string // Source property for move/copy
 }
 
-func (n *ChangeNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *ChangeNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 
 	rulesRaw, ok := cfg.Get("rules").([]any)
@@ -85,10 +86,22 @@ func (n *ChangeNode) Init(ctx context.Context, cfg *node.Config) error {
 		n.rules = append(n.rules, rule)
 	}
 
+	if outputs.Has("default") {
+		var err error
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
+	if n.output == nil {
+		return nil
+	}
+
 	// Clone the message to avoid modifying the original
 	out := msg.Clone()
 
@@ -112,7 +125,7 @@ func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, emit nod
 		}
 	}
 
-	emit.Emit("default", out)
+	n.output.Send(out)
 	return nil
 }
 

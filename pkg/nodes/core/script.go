@@ -17,8 +17,8 @@ func init() {
 		Name:        "Script",
 		Description: "Executes JavaScript code using goja",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to process"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Processed message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to process"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Processed message"}},
 		Config: []node.ConfigSpec{
 			{Name: "code", Type: "string", Default: defaultScriptCode, Description: "JavaScript code to execute. The code runs inside a function with 'msg' as the argument. Use 'return' to output a message.", Format: "code", Language: "javascript"},
 			{Name: "stateful", Type: "bool", Default: false, Description: "Reuse VM across invocations"},
@@ -33,12 +33,15 @@ type ScriptNode struct {
 	vm       *goja.Runtime
 	script   *goja.Program
 	stateful bool // If true, reuse VM across invocations
+	outputs  node.Outputs
+	output   node.Output // default output
 }
 
-func (n *ScriptNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *ScriptNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.code = cfg.GetString("code", defaultScriptCode)
 	n.stateful = cfg.GetBool("stateful", false)
+	n.outputs = outputs
 
 	// Wrap the user code in a function
 	wrappedCode := fmt.Sprintf(`
@@ -60,10 +63,18 @@ func (n *ScriptNode) Init(ctx context.Context, cfg *node.Config) error {
 		n.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	}
 
+	// Get default output if wired
+	if outputs.Has("default") {
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *ScriptNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *ScriptNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	// Use persistent VM for stateful scripts, fresh VM otherwise
 	var vm *goja.Runtime
 	if n.stateful && n.vm != nil {
@@ -114,22 +125,31 @@ func (n *ScriptNode) Process(ctx context.Context, msg *message.Message, emit nod
 	switch v := exported.(type) {
 	case map[string]any:
 		// Check if it's a {output: string, msg: object} format
-		if output, ok := v["output"].(string); ok {
+		if outputName, ok := v["output"].(string); ok {
 			if msgData, ok := v["msg"].(map[string]any); ok {
 				outMsg := n.mapToMessage(msgData, msg)
-				emit.Emit(output, outMsg)
+				// Try to get the named output
+				if n.outputs.Has(outputName) {
+					if out, err := n.outputs.Get(outputName); err == nil {
+						out.Send(outMsg)
+					}
+				}
 				return nil
 			}
 		}
 		// Otherwise treat as the new message
 		outMsg := n.mapToMessage(v, msg)
-		emit.Emit("default", outMsg)
+		if n.output != nil {
+			n.output.Send(outMsg)
+		}
 
 	default:
 		// Use result as payload
 		outMsg := msg.Clone()
 		outMsg.Payload = exported
-		emit.Emit("default", outMsg)
+		if n.output != nil {
+			n.output.Send(outMsg)
+		}
 	}
 
 	return nil

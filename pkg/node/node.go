@@ -39,15 +39,51 @@ type ConfigSpec struct {
 	Language string `json:"language,omitempty"` // e.g., "javascript", "json", "yaml", "template"
 }
 
+// Output represents a handle to an output port.
+// Obtained during Init via Outputs.Get() - errors if port doesn't exist.
+type Output interface {
+	// Send sends a message to this output port.
+	Send(msg *message.Message)
+}
+
+// Outputs provides access to output ports during initialization.
+// Use Get() to obtain Output handles - errors if port isn't wired.
+type Outputs interface {
+	// Get returns an Output handle for the named port.
+	// Returns error if the port doesn't exist or isn't wired.
+	Get(name string) (Output, error)
+
+	// Has returns true if the named output port exists and is wired.
+	Has(name string) bool
+}
+
+// Input represents a handle to an input port.
+// Used to identify which port a message arrived on.
+type Input interface {
+	// Name returns the port name.
+	Name() string
+}
+
+// Inputs provides access to input ports during initialization.
+type Inputs interface {
+	// Get returns an Input handle for the named port.
+	// Returns error if the port doesn't exist or isn't wired.
+	Get(name string) (Input, error)
+
+	// Has returns true if the named input port exists and is wired.
+	Has(name string) bool
+}
+
 // Node defines the interface that all built-in nodes must implement.
 type Node interface {
 	// Init initializes the node with configuration.
 	// Called once during flow initialization.
-	Init(ctx context.Context, cfg *Config) error
+	// Inputs/Outputs allow LBYL port validation - get handles upfront.
+	Init(ctx context.Context, cfg *Config, inputs Inputs, outputs Outputs) error
 
 	// Process handles an incoming message.
-	// The emitter is used to send output messages.
-	Process(ctx context.Context, msg *message.Message, emit Emitter) error
+	// inputPort identifies which input the message arrived on.
+	Process(ctx context.Context, msg *message.Message, inputPort string) error
 
 	// Stop performs cleanup when the node is shutting down.
 	Stop(ctx context.Context) error
@@ -57,10 +93,12 @@ type Node interface {
 type Starter interface {
 	// Start is called after Init, before any messages are processed.
 	// Use this to start timers, pollers, listeners, etc.
-	Start(ctx context.Context, emit Emitter) error
+	// Outputs were already obtained during Init.
+	Start(ctx context.Context) error
 }
 
 // Emitter is used by nodes to emit output messages.
+// Deprecated: Use Output.Send() instead. Kept for backwards compatibility.
 type Emitter interface {
 	// Emit sends a message to the specified output port.
 	// Use "default" for the default output.

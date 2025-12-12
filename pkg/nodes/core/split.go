@@ -15,8 +15,8 @@ func init() {
 		Name:        "Split",
 		Description: "Splits a message into multiple messages",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to split"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Split messages"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to split"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Split messages"}},
 		Config: []node.ConfigSpec{
 			{Name: "split_on", Type: "string", Default: "array", Description: "Split mode", Options: []any{"array", "string", "object"}},
 			{Name: "delimiter", Type: "string", Default: "\n", Description: "Delimiter for string splitting"},
@@ -31,34 +31,48 @@ type SplitNode struct {
 	splitOn   string // "array", "string", "object"
 	delimiter string // For string splitting
 	addParts  bool   // Add parts info to metadata
+	output    node.Output
 }
 
-func (n *SplitNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *SplitNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.splitOn = cfg.GetString("split_on", "array")
 	n.delimiter = cfg.GetString("delimiter", "\n")
 	n.addParts = cfg.GetBool("add_parts", true)
+
+	if outputs.Has("default") {
+		var err error
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *SplitNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *SplitNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
+	if n.output == nil {
+		return nil
+	}
+
 	switch n.splitOn {
 	case "array":
-		return n.splitArray(msg, emit)
+		return n.splitArray(msg)
 	case "string":
-		return n.splitString(msg, emit)
+		return n.splitString(msg)
 	case "object":
-		return n.splitObject(msg, emit)
+		return n.splitObject(msg)
 	default:
 		return fmt.Errorf("unknown split mode: %s", n.splitOn)
 	}
 }
 
-func (n *SplitNode) splitArray(msg *message.Message, emit node.Emitter) error {
+func (n *SplitNode) splitArray(msg *message.Message) error {
 	arr, ok := msg.Payload.([]any)
 	if !ok {
 		// Not an array, pass through
-		emit.Emit("default", msg)
+		n.output.Send(msg)
 		return nil
 	}
 
@@ -71,16 +85,16 @@ func (n *SplitNode) splitArray(msg *message.Message, emit node.Emitter) error {
 			out.SetMeta("split_total", fmt.Sprintf("%d", total))
 			out.SetMeta("split_id", msg.ID)
 		}
-		emit.Emit("default", out)
+		n.output.Send(out)
 	}
 
 	return nil
 }
 
-func (n *SplitNode) splitString(msg *message.Message, emit node.Emitter) error {
+func (n *SplitNode) splitString(msg *message.Message) error {
 	str, ok := msg.Payload.(string)
 	if !ok {
-		emit.Emit("default", msg)
+		n.output.Send(msg)
 		return nil
 	}
 
@@ -95,16 +109,16 @@ func (n *SplitNode) splitString(msg *message.Message, emit node.Emitter) error {
 			out.SetMeta("split_total", fmt.Sprintf("%d", total))
 			out.SetMeta("split_id", msg.ID)
 		}
-		emit.Emit("default", out)
+		n.output.Send(out)
 	}
 
 	return nil
 }
 
-func (n *SplitNode) splitObject(msg *message.Message, emit node.Emitter) error {
+func (n *SplitNode) splitObject(msg *message.Message) error {
 	obj, ok := msg.Payload.(map[string]any)
 	if !ok {
-		emit.Emit("default", msg)
+		n.output.Send(msg)
 		return nil
 	}
 
@@ -123,7 +137,7 @@ func (n *SplitNode) splitObject(msg *message.Message, emit node.Emitter) error {
 			out.SetMeta("split_id", msg.ID)
 			out.SetMeta("split_key", key)
 		}
-		emit.Emit("default", out)
+		n.output.Send(out)
 		index++
 	}
 

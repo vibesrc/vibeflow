@@ -16,7 +16,7 @@ func init() {
 		Name:        "Switch",
 		Description: "Routes messages to different outputs based on conditions",
 		Category:    "core",
-		Inputs:  []node.PortInfo{{Name: "input", Description: "Message to route"}},
+		Inputs:  []node.PortInfo{{Name: "default", Description: "Message to route"}},
 		Outputs: []node.PortInfo{{Name: "default", Description: "Default output (no match)"}},
 		Config: []node.ConfigSpec{
 			{Name: "property", Type: "string", Default: "payload", Description: "Property to evaluate (dot notation)"},
@@ -41,21 +41,32 @@ type SwitchNode struct {
 	id         string
 	property   string // Property to evaluate (supports dot notation)
 	rules      []switchRule
-	checkAll   bool // Check all rules vs stop at first match
-	defaultOut string
+	checkAll   bool        // Check all rules vs stop at first match
+	defaultOut node.Output // Default output if no match
+	outputs    node.Outputs
 }
 
 type switchRule struct {
 	condition string // JavaScript expression
-	output    string // Output port name
+	output    node.Output
 	compiled  *goja.Program
 }
 
-func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.property = cfg.GetString("property", "payload")
 	n.checkAll = cfg.GetBool("check_all", false)
-	n.defaultOut = cfg.GetString("default", "")
+	n.outputs = outputs
+
+	// Get default output if configured and wired
+	defaultOutName := cfg.GetString("default", "")
+	if defaultOutName != "" && outputs.Has(defaultOutName) {
+		var err error
+		n.defaultOut, err = outputs.Get(defaultOutName)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Parse rules from config
 	rulesRaw, ok := cfg.Get("rules").([]any)
@@ -70,19 +81,28 @@ func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config) error {
 		}
 
 		condition, _ := ruleMap["condition"].(string)
-		output, _ := ruleMap["output"].(string)
+		outputName, _ := ruleMap["output"].(string)
 
 		if condition == "" {
 			return fmt.Errorf("switch node %s: rule %d missing condition", n.id, i)
 		}
-		if output == "" {
-			output = fmt.Sprintf("out%d", i)
+		if outputName == "" {
+			outputName = fmt.Sprintf("out%d", i)
 		}
 
 		// Compile the condition
 		program, err := goja.Compile(fmt.Sprintf("%s_rule_%d", n.id, i), condition, false)
 		if err != nil {
 			return fmt.Errorf("switch node %s: rule %d compile error: %w", n.id, i, err)
+		}
+
+		// Get output handle if wired
+		var output node.Output
+		if outputs.Has(outputName) {
+			output, err = outputs.Get(outputName)
+			if err != nil {
+				return err
+			}
 		}
 
 		n.rules = append(n.rules, switchRule{
@@ -95,7 +115,7 @@ func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config) error {
 	return nil
 }
 
-func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	// Get the property value to evaluate
 	value := n.getProperty(msg)
 
@@ -117,16 +137,18 @@ func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, emit nod
 
 		if result.ToBoolean() {
 			matched = true
-			emit.Emit(rule.output, msg.Clone())
+			if rule.output != nil {
+				rule.output.Send(msg.Clone())
+			}
 			if !n.checkAll {
 				return nil
 			}
 		}
 	}
 
-	// Send to default output if no match and default is configured
-	if !matched && n.defaultOut != "" {
-		emit.Emit(n.defaultOut, msg.Clone())
+	// Send to default output if no match and default is wired
+	if !matched && n.defaultOut != nil {
+		n.defaultOut.Send(msg.Clone())
 	}
 
 	return nil

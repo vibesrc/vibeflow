@@ -14,7 +14,7 @@ type ProxyNode struct {
 	nodeID   string
 	nodeType string
 	hasStart bool
-	emitter  node.Emitter
+	outputs  node.Outputs
 }
 
 // NewProxyNode creates a new proxy node.
@@ -27,8 +27,9 @@ func NewProxyNode(host *Host, nodeType string, hasStart bool) *ProxyNode {
 }
 
 // Init initializes the proxy node.
-func (n *ProxyNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *ProxyNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.nodeID = cfg.ID
+	n.outputs = outputs
 
 	params := &InitParams{
 		NodeID:   cfg.ID,
@@ -49,7 +50,7 @@ func (n *ProxyNode) Init(ctx context.Context, cfg *node.Config) error {
 }
 
 // Process processes a message through the external node.
-func (n *ProxyNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *ProxyNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	params := &ProcessParams{
 		NodeID:  n.nodeID,
 		Message: msg,
@@ -65,9 +66,13 @@ func (n *ProxyNode) Process(ctx context.Context, msg *message.Message, emit node
 	}
 
 	// Emit output messages
-	for output, msgs := range result.Outputs {
-		for _, m := range msgs {
-			emit.Emit(output, m)
+	for outputName, msgs := range result.Outputs {
+		if n.outputs.Has(outputName) {
+			if out, err := n.outputs.Get(outputName); err == nil {
+				for _, m := range msgs {
+					out.Send(m)
+				}
+			}
 		}
 	}
 
@@ -75,12 +80,10 @@ func (n *ProxyNode) Process(ctx context.Context, msg *message.Message, emit node
 }
 
 // Start implements node.Starter for nodes that need it.
-func (n *ProxyNode) Start(ctx context.Context, emit node.Emitter) error {
+func (n *ProxyNode) Start(ctx context.Context) error {
 	if !n.hasStart {
 		return nil
 	}
-
-	n.emitter = emit
 
 	params := &StartParams{
 		NodeID: n.nodeID,
@@ -96,9 +99,13 @@ func (n *ProxyNode) Start(ctx context.Context, emit node.Emitter) error {
 	}
 
 	// Emit any initial messages
-	for output, msgs := range result.Outputs {
-		for _, m := range msgs {
-			emit.Emit(output, m)
+	for outputName, msgs := range result.Outputs {
+		if n.outputs.Has(outputName) {
+			if out, err := n.outputs.Get(outputName); err == nil {
+				for _, m := range msgs {
+					out.Send(m)
+				}
+			}
 		}
 	}
 

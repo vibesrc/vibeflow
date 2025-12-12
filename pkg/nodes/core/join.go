@@ -18,8 +18,8 @@ func init() {
 		Name:        "Join",
 		Description: "Combines multiple messages into one",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Messages to join"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Joined message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Messages to join"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Joined message"}},
 		Config: []node.ConfigSpec{
 			{Name: "mode", Type: "string", Default: "auto", Description: "Join mode", Options: []any{"auto", "count", "timeout"}},
 			{Name: "count", Type: "int", Default: 0, Description: "Number of messages to join"},
@@ -42,6 +42,7 @@ type JoinNode struct {
 	delimiter string // For string joining
 	key       string // Property to use as key for object mode
 
+	output  node.Output
 	mu      sync.Mutex
 	groups  map[string]*joinGroup
 	stopCh  chan struct{}
@@ -54,7 +55,7 @@ type joinGroup struct {
 	created  time.Time
 }
 
-func (n *JoinNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *JoinNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.mode = cfg.GetString("mode", "auto")
 	n.count = cfg.GetInt("count", 0)
@@ -64,17 +65,26 @@ func (n *JoinNode) Init(ctx context.Context, cfg *node.Config) error {
 	n.key = cfg.GetString("key", "")
 	n.groups = make(map[string]*joinGroup)
 	n.stopCh = make(chan struct{})
+
+	if outputs.Has("default") {
+		var err error
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *JoinNode) Start(ctx context.Context, emit node.Emitter) error {
+func (n *JoinNode) Start(ctx context.Context) error {
 	n.started = true
 	// Start timeout checker
-	go n.timeoutChecker(ctx, emit)
+	go n.timeoutChecker(ctx)
 	return nil
 }
 
-func (n *JoinNode) timeoutChecker(ctx context.Context, emit node.Emitter) {
+func (n *JoinNode) timeoutChecker(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(n.timeoutMS/2) * time.Millisecond)
 	defer ticker.Stop()
 
@@ -85,12 +95,12 @@ func (n *JoinNode) timeoutChecker(ctx context.Context, emit node.Emitter) {
 		case <-n.stopCh:
 			return
 		case <-ticker.C:
-			n.checkTimeouts(emit)
+			n.checkTimeouts()
 		}
 	}
 }
 
-func (n *JoinNode) checkTimeouts(emit node.Emitter) {
+func (n *JoinNode) checkTimeouts() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -99,13 +109,13 @@ func (n *JoinNode) checkTimeouts(emit node.Emitter) {
 
 	for groupID, group := range n.groups {
 		if now.Sub(group.created) > timeout && len(group.messages) > 0 {
-			n.emitGroup(groupID, group, emit)
+			n.emitGroup(groupID, group)
 			delete(n.groups, groupID)
 		}
 	}
 }
 
-func (n *JoinNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *JoinNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -139,7 +149,7 @@ func (n *JoinNode) Process(ctx context.Context, msg *message.Message, emit node.
 	}
 
 	if complete {
-		n.emitGroup(groupID, group, emit)
+		n.emitGroup(groupID, group)
 		delete(n.groups, groupID)
 	}
 
@@ -164,8 +174,8 @@ func (n *JoinNode) getExpected(msg *message.Message) int {
 	return n.count
 }
 
-func (n *JoinNode) emitGroup(groupID string, group *joinGroup, emit node.Emitter) {
-	if len(group.messages) == 0 {
+func (n *JoinNode) emitGroup(groupID string, group *joinGroup) {
+	if len(group.messages) == 0 || n.output == nil {
 		return
 	}
 
@@ -222,7 +232,7 @@ func (n *JoinNode) emitGroup(groupID string, group *joinGroup, emit node.Emitter
 
 	out.SetMeta("joined_count", fmt.Sprintf("%d", len(sortedMsgs)))
 
-	emit.Emit("default", out)
+	n.output.Send(out)
 }
 
 func (n *JoinNode) sortByIndex(msgs []*message.Message) []*message.Message {

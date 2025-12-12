@@ -16,8 +16,8 @@ func init() {
 		Name:        "Delay",
 		Description: "Delays messages by a specified duration",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to delay"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Delayed message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to delay"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Delayed message"}},
 		Config: []node.ConfigSpec{
 			{Name: "delay_ms", Type: "int", Default: 1000, Description: "Delay in milliseconds"},
 			{Name: "randomize", Type: "bool", Default: false, Description: "Add random variation"},
@@ -37,13 +37,14 @@ type DelayNode struct {
 	rateLimit  int   // Messages per second (0 = disabled)
 	drop       bool  // Drop messages if rate limited
 
+	output   node.Output
 	mu       sync.Mutex
 	wg       sync.WaitGroup
 	stopCh   chan struct{}
 	lastSent time.Time
 }
 
-func (n *DelayNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *DelayNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
 	n.delayMS = cfg.GetInt("delay_ms", 1000)
 	n.randomize = cfg.GetBool("randomize", false)
@@ -51,10 +52,23 @@ func (n *DelayNode) Init(ctx context.Context, cfg *node.Config) error {
 	n.rateLimit = cfg.GetInt("rate_limit", 0)
 	n.drop = cfg.GetBool("drop", false)
 	n.stopCh = make(chan struct{})
+
+	if outputs.Has("default") {
+		var err error
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *DelayNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *DelayNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
+	if n.output == nil {
+		return nil
+	}
+
 	// Check rate limit
 	if n.rateLimit > 0 {
 		n.mu.Lock()
@@ -95,7 +109,7 @@ func (n *DelayNode) Process(ctx context.Context, msg *message.Message, emit node
 		case <-n.stopCh:
 			return
 		case <-time.After(delay):
-			emit.Emit("default", msg.Clone())
+			n.output.Send(msg.Clone())
 		}
 	}()
 

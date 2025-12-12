@@ -16,8 +16,8 @@ func init() {
 		Name:        "Template",
 		Description: "Applies Go templates to messages",
 		Category:    "core",
-		Inputs:      []node.PortInfo{{Name: "input", Description: "Message to template"}},
-		Outputs:     []node.PortInfo{{Name: "output", Description: "Templated message"}},
+		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to template"}},
+		Outputs:     []node.PortInfo{{Name: "default", Description: "Templated message"}},
 		Config: []node.ConfigSpec{
 			{Name: "template", Type: "string", Required: true, Description: "Go template string"},
 			{Name: "output", Type: "string", Default: "payload", Description: "Output property path"},
@@ -27,14 +27,15 @@ func init() {
 
 // TemplateNode applies Go templates to messages.
 type TemplateNode struct {
-	id       string
-	template *template.Template
-	output   string // "payload" or property path
+	id         string
+	template   *template.Template
+	outputProp string      // "payload" or property path
+	output     node.Output // output port
 }
 
-func (n *TemplateNode) Init(ctx context.Context, cfg *node.Config) error {
+func (n *TemplateNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
-	n.output = cfg.GetString("output", "payload")
+	n.outputProp = cfg.GetString("output", "payload")
 
 	tmplStr := cfg.GetString("template", "")
 	if tmplStr == "" {
@@ -48,10 +49,21 @@ func (n *TemplateNode) Init(ctx context.Context, cfg *node.Config) error {
 	}
 	n.template = tmpl
 
+	if outputs.Has("default") {
+		n.output, err = outputs.Get("default")
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (n *TemplateNode) Process(ctx context.Context, msg *message.Message, emit node.Emitter) error {
+func (n *TemplateNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
+	if n.output == nil {
+		return nil
+	}
+
 	// Build template data
 	data := map[string]any{
 		"id":       msg.ID,
@@ -70,17 +82,17 @@ func (n *TemplateNode) Process(ctx context.Context, msg *message.Message, emit n
 
 	// Set output
 	out := msg.Clone()
-	if n.output == "payload" {
+	if n.outputProp == "payload" {
 		out.Payload = result
 	} else {
 		// Set nested property (simplified - only supports context.X)
 		if out.Context == nil {
 			out.Context = make(map[string]any)
 		}
-		out.Context[n.output] = result
+		out.Context[n.outputProp] = result
 	}
 
-	emit.Emit("default", out)
+	n.output.Send(out)
 	return nil
 }
 
