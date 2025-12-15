@@ -135,6 +135,7 @@ export function FlowEditorPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [errorNodeIds, setErrorNodeIds] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState('config');
 
   // WebSocket for real-time events
   const handleFlowEvent = useCallback((event: WSEvent) => {
@@ -333,6 +334,11 @@ export function FlowEditorPage() {
       draggedNodeTypeRef.current = null;
     }
   }, [handleAddNode]);
+
+  const handleNodeDoubleClick = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setActiveTab('config');
+  }, []);
 
   const handleUpdateNode = useCallback((nodeId: string, updates: Partial<NodeDefinition>) => {
     if (!flowDefinition) return;
@@ -670,6 +676,7 @@ export function FlowEditorPage() {
                   onAddWire={handleAddWire}
                   onDeleteWire={handleDeleteWire}
                   onToggleNodeExpanded={handleToggleNodeExpanded}
+                  onNodeDoubleClick={handleNodeDoubleClick}
                   onDrop={handleCanvasDrop}
                 />
               </ReactFlowProvider>
@@ -686,7 +693,7 @@ export function FlowEditorPage() {
           maxSize={40}
           className="bg-card/50"
         >
-          <Tabs defaultValue="config" className="h-full flex flex-col">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <TabsList className="w-full justify-start rounded-none border-b border-border h-10 px-2 bg-transparent flex-shrink-0">
               <TabsTrigger value="config" className="text-xs gap-1.5">
                 <Settings className="w-3.5 h-3.5" />

@@ -29,6 +29,7 @@ interface FlowCanvasProps {
   onAddWire: (from: string, to: string, output: string, input: string) => void;
   onDeleteWire: (from: string, to: string, output: string, input: string) => void;
   onToggleNodeExpanded: (nodeId: string, expanded: boolean) => void;
+  onNodeDoubleClick?: (nodeId: string) => void;
   onDrop?: (x: number, y: number) => void;
 }
 
@@ -64,6 +65,7 @@ export function FlowCanvas({
   onAddWire,
   onDeleteWire,
   onToggleNodeExpanded,
+  onNodeDoubleClick,
   onDrop,
 }: FlowCanvasProps) {
   const reactFlowInstance = useReactFlow();
@@ -330,6 +332,15 @@ export function FlowCanvas({
     [onSelectNode]
   );
 
+  // Handle node double click
+  const handleNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      onSelectNode(node.id);
+      onNodeDoubleClick?.(node.id);
+    },
+    [onSelectNode, onNodeDoubleClick]
+  );
+
   return (
     <div className="w-full h-full" onDragOver={handleDragOver} onDrop={handleDrop}>
       <ReactFlow
@@ -340,6 +351,7 @@ export function FlowCanvas({
         onConnect={handleConnect}
         onSelectionChange={handleSelectionChange}
         onPaneClick={handlePaneClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
         nodeTypes={nodeTypes}
         snapToGrid
         snapGrid={[GRID_SIZE, GRID_SIZE]}
