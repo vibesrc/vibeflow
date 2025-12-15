@@ -19,7 +19,7 @@ func init() {
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Pass-through message"}},
 		Config: []node.ConfigSpec{
 			{Name: "complete", Type: "bool", Default: false, Description: "Log complete message (vs just payload)"},
-			{Name: "to_stdout", Type: "bool", Default: true, Description: "Output to stdout/console"},
+			{Name: "to_stdout", Type: "bool", Default: false, Description: "Output to stdout/console"},
 			{Name: "to_sidebar", Type: "bool", Default: true, Description: "Output to debug sidebar in UI"},
 		},
 	})
@@ -42,7 +42,7 @@ func (n *DebugNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inpu
 		n.name = cfg.ID
 	}
 	n.complete = cfg.GetBool("complete", false)
-	n.toStdout = cfg.GetBool("to_stdout", true)
+	n.toStdout = cfg.GetBool("to_stdout", false)
 	n.toSidebar = cfg.GetBool("to_sidebar", true)
 
 	// Output is optional - debug is often a terminal node
