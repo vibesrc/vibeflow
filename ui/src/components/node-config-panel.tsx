@@ -26,14 +26,32 @@ function isEmpty(value: unknown): boolean {
   return false;
 }
 
-// Evaluate showWhen conditions against current config values
+// Get the effective value of a field, considering defaults from schema
+function getEffectiveValue(
+  fieldName: string,
+  config: Record<string, unknown>,
+  schema: ConfigSpec[]
+): unknown {
+  if (fieldName in config) {
+    return config[fieldName];
+  }
+  // Look up default from schema
+  const spec = schema.find((s) => s.name === fieldName);
+  if (spec?.default !== undefined) {
+    return spec.default;
+  }
+  return undefined;
+}
+
+// Evaluate showWhen conditions against current config values (with schema defaults)
 function evaluateShowWhen(
   showWhen: ShowWhen | undefined,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  schema: ConfigSpec[] = []
 ): boolean {
   if (!showWhen) return true; // No condition = always show
 
-  const fieldValue = config[showWhen.field];
+  const fieldValue = getEffectiveValue(showWhen.field, config, schema);
 
   // Check 'eq' condition
   if (showWhen.eq !== undefined) {
@@ -190,7 +208,7 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
           <div className="space-y-3">
             {/* Schema-defined fields - filtered by showWhen conditions */}
             {configSchema
-              .filter((spec) => evaluateShowWhen(spec.showWhen, localConfig))
+              .filter((spec) => evaluateShowWhen(spec.showWhen, localConfig, configSchema))
               .map((spec) => {
                 // Use value from localConfig, or fall back to spec default, or type default
                 const value = spec.name in localConfig
@@ -317,7 +335,7 @@ function ArrayItemsEditor({
           </div>
           <div className="space-y-2">
             {itemsSchema
-              .filter((fieldSpec) => evaluateShowWhen(fieldSpec.showWhen, item))
+              .filter((fieldSpec) => evaluateShowWhen(fieldSpec.showWhen, item, itemsSchema))
               .map((fieldSpec) => (
                 <ItemField
                   key={fieldSpec.name}

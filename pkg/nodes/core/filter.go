@@ -71,15 +71,7 @@ func (n *FilterNode) Process(ctx context.Context, msg *message.Message, inputPor
 	}
 
 	// Build environment for expression evaluation
-	env := map[string]any{
-		"msg": map[string]any{
-			"id":       msg.ID,
-			"payload":  msg.Payload,
-			"metadata": msg.Metadata,
-			"context":  msg.Context,
-		},
-		"payload": msg.Payload,
-	}
+	env := node.BuildExprEnv(msg)
 
 	// Run the compiled expression
 	result, err := expr.Run(n.compiled, env)

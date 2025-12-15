@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/bherbruck/vibeflow/pkg/message"
 	"github.com/bherbruck/vibeflow/pkg/node"
@@ -117,19 +116,12 @@ func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inp
 }
 
 func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
-	// Get the property value to evaluate
-	value := n.getProperty(msg)
+	// Get the property value to evaluate using expr
+	value, _ := node.EvalExpr(n.property, msg)
 
 	// Build environment for expression evaluation
-	env := map[string]any{
-		"value": value,
-		"msg": map[string]any{
-			"id":       msg.ID,
-			"payload":  msg.Payload,
-			"metadata": msg.Metadata,
-			"context":  msg.Context,
-		},
-	}
+	env := node.BuildExprEnv(msg)
+	env["value"] = value
 
 	matched := false
 	for _, rule := range n.rules {
@@ -155,39 +147,6 @@ func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, inputPor
 	}
 
 	return nil
-}
-
-func (n *SwitchNode) getProperty(msg *message.Message) any {
-	parts := strings.Split(n.property, ".")
-	if len(parts) == 0 {
-		return nil
-	}
-
-	var current any
-	switch parts[0] {
-	case "payload":
-		current = msg.Payload
-	case "metadata":
-		current = msg.Metadata
-	case "context":
-		current = msg.Context
-	default:
-		return nil
-	}
-
-	// Navigate nested properties
-	for _, part := range parts[1:] {
-		switch v := current.(type) {
-		case map[string]any:
-			current = v[part]
-		case map[string]string:
-			current = v[part]
-		default:
-			return nil
-		}
-	}
-
-	return current
 }
 
 func (n *SwitchNode) Stop(ctx context.Context) error {

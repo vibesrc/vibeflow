@@ -108,18 +108,25 @@ func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, inputPor
 	for _, rule := range n.rules {
 		switch rule.action {
 		case "set":
-			n.setProperty(out, rule.property, rule.value)
+			// If value is a string, try to evaluate it as an expression
+			val := rule.value
+			if s, ok := val.(string); ok && s != "" {
+				if evaluated, err := node.EvalExpr(s, out); err == nil {
+					val = evaluated
+				}
+			}
+			n.setProperty(out, rule.property, val)
 		case "delete":
 			n.deleteProperty(out, rule.property)
 		case "move":
 			if rule.from != "" {
-				val := n.getProperty(out, rule.from)
+				val, _ := node.EvalExpr(rule.from, out)
 				n.setProperty(out, rule.property, val)
 				n.deleteProperty(out, rule.from)
 			}
 		case "copy":
 			if rule.from != "" {
-				val := n.getProperty(out, rule.from)
+				val, _ := node.EvalExpr(rule.from, out)
 				n.setProperty(out, rule.property, val)
 			}
 		}

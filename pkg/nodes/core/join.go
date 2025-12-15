@@ -212,11 +212,9 @@ func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
 		for _, m := range sortedMsgs {
 			key := m.GetMeta("split_key")
 			if key == "" && n.key != "" {
-				// Try to get key from payload
-				if p, ok := m.Payload.(map[string]any); ok {
-					if k, ok := p[n.key].(string); ok {
-						key = k
-					}
+				// Extract key using expr
+				if k := node.EvalExprString(n.key, m); k != "" {
+					key = k
 				}
 			}
 			if key == "" {
@@ -225,8 +223,8 @@ func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
 			// Get value - either specific property or whole payload
 			var val any = m.Payload
 			if n.value != "" {
-				if p, ok := m.Payload.(map[string]any); ok {
-					val = p[n.value]
+				if v, err := node.EvalExpr(n.value, m); err == nil && v != nil {
+					val = v
 				}
 			}
 			obj[key] = val
