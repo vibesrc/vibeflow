@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ReactFlowProvider } from '@xyflow/react';
 import { getFlow, updateFlow, listNodeTypes, startFlow, stopFlow } from '@/api';
-import type { NodeType, FlowDefinition, NodeDefinition } from '@/api';
+import type { NodeType, FlowDefinition, NodeDefinition, Wire } from '@/api';
 import { useFlowHistory } from '@/hooks/use-flow-history';
 import { useFlowEvents, type WSEvent } from '@/hooks/use-websocket';
 import { useMinDuration } from '@/hooks/use-min-duration';
@@ -17,6 +17,7 @@ import {
   ResizableHandle,
 } from '@/components/ui/resizable';
 import {
+  AlertCircle,
   ArrowLeft,
   Play,
   Square,
@@ -613,7 +614,7 @@ export function FlowEditorPage() {
           className="bg-card/50"
         >
           <EditorSidebar
-            selectedNode={selectedNode}
+            selectedNode={selectedNode ?? undefined}
             selectedNodeType={selectedNodeType}
             onUpdateNode={(updates) => selectedNode && handleUpdateNode(selectedNode.id, updates)}
             environment={flowDefinition?.environment || {}}

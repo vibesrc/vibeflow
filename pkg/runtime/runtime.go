@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 
+	vfcontext "github.com/bherbruck/vibeflow/pkg/context"
 	"github.com/bherbruck/vibeflow/pkg/events"
 	"github.com/bherbruck/vibeflow/pkg/external"
 	"github.com/bherbruck/vibeflow/pkg/flow"
@@ -20,6 +21,7 @@ type Runtime struct {
 	plugins  *external.Manager
 	logger   *slog.Logger
 	events   *events.Bus
+	store    vfcontext.Store // Context store for flow/node/global state
 
 	mu        sync.RWMutex
 	flowID    string // Current flow ID
@@ -154,6 +156,13 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithStore sets the context store for the runtime.
+func WithStore(store vfcontext.Store) Option {
+	return func(r *Runtime) {
+		r.store = store
+	}
+}
+
 // New creates a new runtime.
 func New(registry *node.Registry, opts ...Option) *Runtime {
 	if registry == nil {
@@ -163,6 +172,7 @@ func New(registry *node.Registry, opts ...Option) *Runtime {
 		registry:   registry,
 		plugins:    external.NewManager(),
 		logger:     slog.Default(),
+		store:      vfcontext.NewMemoryStore(), // Default to in-memory store
 		nodes:      make(map[string]node.Node),
 		nodeNames:  make(map[string]string),
 		wires:      make(map[string][]wire),
@@ -420,6 +430,14 @@ func (r *Runtime) runNode(ctx context.Context, nodeID string, n node.Node) {
 		nodeName: nodeName,
 	}
 	ctx = context.WithValue(ctx, node.DebugEmitterKey, de)
+
+	// Add context accessors for flow/node/global state
+	flowCtx := vfcontext.NewFlowContext(r.store, flowID)
+	nodeCtx := vfcontext.NewNodeContext(r.store, flowID, nodeID)
+	globalCtx := vfcontext.NewGlobalContext(r.store)
+	ctx = context.WithValue(ctx, node.FlowContextKey, flowCtx)
+	ctx = context.WithValue(ctx, node.NodeContextKey, nodeCtx)
+	ctx = context.WithValue(ctx, node.GlobalContextKey, globalCtx)
 
 	for {
 		select {

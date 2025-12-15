@@ -144,6 +144,58 @@ func GetDebugEmitter(ctx context.Context) DebugEmitter {
 	return nil
 }
 
+// ContextAccessor provides get/set operations for context state.
+type ContextAccessor interface {
+	Get(key string) (any, bool)
+	Set(key string, value any)
+	Delete(key string)
+	Keys() []string
+}
+
+// Context keys for flow and node state
+type flowContextKeyType struct{}
+type nodeContextKeyType struct{}
+type globalContextKeyType struct{}
+
+// FlowContextKey is used to store/retrieve FlowContext from context.
+var FlowContextKey = flowContextKeyType{}
+
+// NodeContextKey is used to store/retrieve NodeContext from context.
+var NodeContextKey = nodeContextKeyType{}
+
+// GlobalContextKey is used to store/retrieve GlobalContext from context.
+var GlobalContextKey = globalContextKeyType{}
+
+// GetFlowContext retrieves the flow context accessor, or nil if not present.
+func GetFlowContext(ctx context.Context) ContextAccessor {
+	if v := ctx.Value(FlowContextKey); v != nil {
+		if fc, ok := v.(ContextAccessor); ok {
+			return fc
+		}
+	}
+	return nil
+}
+
+// GetNodeContext retrieves the node context accessor, or nil if not present.
+func GetNodeContext(ctx context.Context) ContextAccessor {
+	if v := ctx.Value(NodeContextKey); v != nil {
+		if nc, ok := v.(ContextAccessor); ok {
+			return nc
+		}
+	}
+	return nil
+}
+
+// GetGlobalContext retrieves the global context accessor, or nil if not present.
+func GetGlobalContext(ctx context.Context) ContextAccessor {
+	if v := ctx.Value(GlobalContextKey); v != nil {
+		if gc, ok := v.(ContextAccessor); ok {
+			return gc
+		}
+	}
+	return nil
+}
+
 // Config holds the configuration for a node instance.
 type Config struct {
 	// ID is the unique node identifier in the flow

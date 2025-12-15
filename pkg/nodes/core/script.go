@@ -21,47 +21,51 @@ func init() {
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Processed message"}},
 		Config: []node.ConfigSpec{
 			{Name: "code", Type: "string", Default: defaultScriptCode, Description: "JavaScript code to execute. The code runs inside a function with 'msg' as the argument. Use 'return' to output a message.", Format: "code", Language: "javascript"},
-			{Name: "stateful", Type: "bool", Default: false, Description: "Reuse VM across invocations"},
 		},
 	})
 }
 
 // ScriptNode executes JavaScript code using goja.
 type ScriptNode struct {
-	id       string
-	code     string
-	vm       *goja.Runtime
-	script   *goja.Program
-	stateful bool // If true, reuse VM across invocations
-	outputs  node.Outputs
-	output   node.Output // default output
+	id      string
+	vm      *goja.Runtime
+	fn      goja.Callable // Cached function reference
+	outputs node.Outputs
+	output  node.Output // default output
 }
 
 func (n *ScriptNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
-	n.code = cfg.GetString("code", defaultScriptCode)
-	n.stateful = cfg.GetBool("stateful", false)
 	n.outputs = outputs
+
+	code := cfg.GetString("code", defaultScriptCode)
 
 	// Wrap the user code in a function
 	wrappedCode := fmt.Sprintf(`
 (function(msg) {
 %s
 })
-`, n.code)
+`, code)
 
 	// Compile the script
 	program, err := goja.Compile(n.id, wrappedCode, false)
 	if err != nil {
 		return fmt.Errorf("script node %s: compilation error: %w", n.id, err)
 	}
-	n.script = program
 
-	// For stateful scripts, create a persistent VM
-	if n.stateful {
-		n.vm = goja.New()
-		n.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
+	// Create VM and cache the function
+	n.vm = goja.New()
+	n.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
+
+	val, err := n.vm.RunProgram(program)
+	if err != nil {
+		return fmt.Errorf("script node %s: runtime error: %w", n.id, err)
 	}
+	fn, ok := goja.AssertFunction(val)
+	if !ok {
+		return fmt.Errorf("script node %s: code did not return a function", n.id)
+	}
+	n.fn = fn
 
 	// Get default output if wired
 	if outputs.Has("default") {
@@ -75,37 +79,19 @@ func (n *ScriptNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inp
 }
 
 func (n *ScriptNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
-	// Use persistent VM for stateful scripts, fresh VM otherwise
-	var vm *goja.Runtime
-	if n.stateful && n.vm != nil {
-		vm = n.vm
-	} else {
-		vm = goja.New()
-		vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
-	}
-
-	// Run the compiled script to get the function
-	val, err := vm.RunProgram(n.script)
-	if err != nil {
-		return fmt.Errorf("script node %s: runtime error: %w", n.id, err)
-	}
-
-	// Get the function
-	fn, ok := goja.AssertFunction(val)
-	if !ok {
-		return fmt.Errorf("script node %s: code did not return a function", n.id)
-	}
+	// Update context accessors (need fresh Go context each call)
+	n.setupContextAccessors(ctx, n.vm)
 
 	// Convert message to JS object
-	msgObj := vm.ToValue(map[string]any{
+	msgObj := n.vm.ToValue(map[string]any{
 		"id":       msg.ID,
 		"payload":  msg.Payload,
 		"metadata": msg.Metadata,
 		"context":  msg.Context,
 	})
 
-	// Call the function
-	result, err := fn(goja.Undefined(), msgObj)
+	// Call the cached function
+	result, err := n.fn(goja.Undefined(), msgObj)
 	if err != nil {
 		return fmt.Errorf("script node %s: execution error: %w", n.id, err)
 	}
@@ -175,6 +161,44 @@ func (n *ScriptNode) mapToMessage(data map[string]any, original *message.Message
 	}
 
 	return msg
+}
+
+// setupContextAccessors adds flow, node, and global context objects to the VM.
+// Each object has get(key), set(key, value), delete(key), and keys() methods.
+func (n *ScriptNode) setupContextAccessors(ctx context.Context, vm *goja.Runtime) {
+	// Helper to create a context accessor object
+	createAccessor := func(accessor node.ContextAccessor) map[string]any {
+		return map[string]any{
+			"get": func(key string) any {
+				if accessor == nil {
+					return nil
+				}
+				val, _ := accessor.Get(key)
+				return val
+			},
+			"set": func(key string, value any) {
+				if accessor != nil {
+					accessor.Set(key, value)
+				}
+			},
+			"delete": func(key string) {
+				if accessor != nil {
+					accessor.Delete(key)
+				}
+			},
+			"keys": func() []string {
+				if accessor == nil {
+					return nil
+				}
+				return accessor.Keys()
+			},
+		}
+	}
+
+	// Add flow, node, and global context objects
+	vm.Set("flow", createAccessor(node.GetFlowContext(ctx)))
+	vm.Set("node", createAccessor(node.GetNodeContext(ctx)))
+	vm.Set("global", createAccessor(node.GetGlobalContext(ctx)))
 }
 
 func (n *ScriptNode) Stop(ctx context.Context) error {
