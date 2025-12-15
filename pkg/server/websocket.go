@@ -99,12 +99,14 @@ func (h *WSHub) run() {
 }
 
 // isDebugPanelEvent returns true for events that should be sent to the debug panel.
-// Only send: debug node output and flow lifecycle (start/stop).
+// Only send: debug node output, flow lifecycle (start/stop), and errors.
 func isDebugPanelEvent(t events.EventType) bool {
 	switch t {
 	case events.EventDebug,
 		events.EventFlowStart,
-		events.EventFlowStop:
+		events.EventFlowStop,
+		events.EventFlowError,
+		events.EventNodeError:
 		return true
 	default:
 		return false

@@ -83,8 +83,8 @@ type DebugData struct {
 
 // ErrorData is the payload for error events.
 type ErrorData struct {
-	Error   error
-	Message string
+	Error   error  `json:"-"`       // Not serialized (errors don't marshal well)
+	Message string `json:"message"` // Human-readable error message
 }
 
 // VariableData is the payload for EventVariable.

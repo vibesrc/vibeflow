@@ -5,6 +5,7 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
@@ -28,6 +29,7 @@ interface FlowCanvasProps {
   onAddWire: (from: string, to: string, output: string, input: string) => void;
   onDeleteWire: (from: string, to: string, output: string, input: string) => void;
   onToggleNodeExpanded: (nodeId: string, expanded: boolean) => void;
+  onDrop?: (x: number, y: number) => void;
 }
 
 type VibeflowNodeType = Node<VibeflowNodeData, 'vibeflow'>;
@@ -40,17 +42,20 @@ const GRID_SIZE = 20;
 const WIRE_COLOR_DEFAULT = 'oklch(0.5 0.08 260)';
 const WIRE_COLOR_SELECTED = 'oklch(0.78 0.18 75)';
 
-// Stable reference for callback
-function useStableCallback<T extends (...args: unknown[]) => unknown>(callback: T): T {
+// Stable reference for callback - preserves argument and return types
+function useStableCallback<Args extends unknown[], R>(
+  callback: (...args: Args) => R
+): (...args: Args) => R {
   const ref = useRef(callback);
   ref.current = callback;
-  return useCallback((...args: unknown[]) => ref.current(...args), []) as T;
+  return useCallback((...args: Args) => ref.current(...args), []);
 }
 
 export function FlowCanvas({
   nodes: nodeDefinitions,
   wires,
   nodeTypes: nodeTypesList,
+  selectedNodeId,
   expandedNodes,
   errorNodeIds,
   onSelectNode,
@@ -59,9 +64,53 @@ export function FlowCanvas({
   onAddWire,
   onDeleteWire,
   onToggleNodeExpanded,
+  onDrop,
 }: FlowCanvasProps) {
+  const reactFlowInstance = useReactFlow();
+
   // Stable callback ref to avoid re-renders
   const stableOnToggle = useStableCallback(onToggleNodeExpanded);
+
+  // Handle drag over to allow drop
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  // Handle drop - convert screen coords to flow coords
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!onDrop) return;
+
+      // Get grab offset from drag data (where user grabbed the palette node)
+      let offsetX = 0;
+      let offsetY = 0;
+      try {
+        const offsetData = e.dataTransfer.getData('application/vibeflow-offset');
+        if (offsetData) {
+          const parsed = JSON.parse(offsetData);
+          offsetX = parsed.offsetX ?? 0;
+          offsetY = parsed.offsetY ?? 0;
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      // Apply offset in screen space, then convert to flow coords
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: e.clientX - offsetX,
+        y: e.clientY - offsetY,
+      });
+
+      // Snap to grid
+      const x = Math.round(position.x / GRID_SIZE) * GRID_SIZE;
+      const y = Math.round(position.y / GRID_SIZE) * GRID_SIZE;
+
+      onDrop(x, y);
+    },
+    [onDrop, reactFlowInstance]
+  );
 
   // Build nodeTypes map
   const nodeTypesMap = useMemo(() => {
@@ -163,11 +212,13 @@ export function FlowCanvas({
   // Track what we last synced to avoid unnecessary updates
   const lastSyncRef = useRef({ nodeKey: '', edgeKey: '' });
 
-  // Sync from props when data actually changes (including config for dynamic ports)
+  // Sync from props when data actually changes (including config for dynamic ports, selection, and errors)
   const nodeKey = useMemo(() =>
     nodeDefinitions.map(n => `${n.id}:${n.x}:${n.y}:${n.name}:${n.enabled}:${JSON.stringify(n.config)}`).join('|') +
-    Object.entries(expandedNodes).map(([k, v]) => `${k}=${v}`).join(','),
-    [nodeDefinitions, expandedNodes]
+    Object.entries(expandedNodes).map(([k, v]) => `${k}=${v}`).join(',') +
+    `|selected:${selectedNodeId}` +
+    `|errors:${errorNodeIds ? [...errorNodeIds].sort().join(',') : ''}`,
+    [nodeDefinitions, expandedNodes, selectedNodeId, errorNodeIds]
   );
 
   const edgeKey = useMemo(() =>
@@ -175,12 +226,11 @@ export function FlowCanvas({
     [wires]
   );
 
-  // Sync nodes if data changed - preserve selection state
+  // Sync nodes if data changed - use selectedNodeId from props
   if (nodeTypesLoaded && nodeKey !== lastSyncRef.current.nodeKey) {
     lastSyncRef.current.nodeKey = nodeKey;
-    setNodes((currentNodes) => {
-      const selectedIds = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id));
-      return flowNodes.map((n) => ({ ...n, selected: selectedIds.has(n.id) }));
+    setNodes(() => {
+      return flowNodes.map((n) => ({ ...n, selected: n.id === selectedNodeId }));
     });
   }
 
@@ -281,7 +331,7 @@ export function FlowCanvas({
   );
 
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full" onDragOver={handleDragOver} onDrop={handleDrop}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

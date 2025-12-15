@@ -45,6 +45,7 @@ import {
 import { cn } from '@/lib/utils';
 import { FlowCanvas } from '@/components/flow-canvas';
 import { NodeConfigPanel } from '@/components/node-config-panel';
+import { PaletteNode } from '@/components/palette-node';
 import yaml from 'js-yaml';
 
 const DEFAULT_FLOW_CONTENT = `version: "1.0"
@@ -133,9 +134,19 @@ export function FlowEditorPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+  const [errorNodeIds, setErrorNodeIds] = useState<Set<string>>(new Set());
 
   // WebSocket for real-time events
-  const { status: wsStatus, events: flowEvents, clearEvents } = useFlowEvents(id ?? null);
+  const handleFlowEvent = useCallback((event: WSEvent) => {
+    if (event.type === 'node.error' && event.node_id) {
+      setErrorNodeIds((prev) => new Set([...prev, event.node_id!]));
+    } else if (event.type === 'flow.start') {
+      // Clear errors when flow restarts
+      setErrorNodeIds(new Set());
+    }
+  }, []);
+
+  const { status: wsStatus, events: flowEvents, clearEvents } = useFlowEvents(id ?? null, handleFlowEvent);
 
   const defaultLayout = useMemo(() => getPanelLayout(), []);
 
@@ -282,7 +293,10 @@ export function FlowEditorPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canUndo, canRedo, undo, redo, hasUnsavedChanges, flowDefinition, handleSave]);
 
-  const handleAddNode = useCallback((nodeType: NodeType) => {
+  // Track dragged node type for drag and drop
+  const draggedNodeTypeRef = useRef<NodeType | null>(null);
+
+  const handleAddNode = useCallback((nodeType: NodeType, position?: { x: number; y: number }) => {
     if (!flowDefinition) return;
 
     const newNode: NodeDefinition = {
@@ -290,8 +304,8 @@ export function FlowEditorPage() {
       type: nodeType.type,
       name: nodeType.name,
       config: {},
-      x: 200 + Math.random() * 200,
-      y: 100 + Math.random() * 200,
+      x: position?.x ?? 200 + Math.random() * 200,
+      y: position?.y ?? 100 + Math.random() * 200,
     };
 
     setFlowDefinition({
@@ -301,6 +315,17 @@ export function FlowEditorPage() {
     setHasUnsavedChanges(true);
     setSelectedNodeId(newNode.id);
   }, [flowDefinition]);
+
+  const handleDragStart = useCallback((_e: React.DragEvent, nodeType: NodeType) => {
+    draggedNodeTypeRef.current = nodeType;
+  }, []);
+
+  const handleCanvasDrop = useCallback((x: number, y: number) => {
+    if (draggedNodeTypeRef.current) {
+      handleAddNode(draggedNodeTypeRef.current, { x, y });
+      draggedNodeTypeRef.current = null;
+    }
+  }, [handleAddNode]);
 
   const handleUpdateNode = useCallback((nodeId: string, updates: Partial<NodeDefinition>) => {
     if (!flowDefinition) return;
@@ -428,12 +453,24 @@ export function FlowEditorPage() {
             nt.category.toLowerCase().includes(searchTerm.toLowerCase())
         )
       : nodeTypes;
-    return filtered.reduce((acc, nt) => {
+
+    // Group by category
+    const groups = filtered.reduce((acc, nt) => {
       const cat = nt.category || 'other';
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(nt);
       return acc;
     }, {} as Record<string, NodeType[]>);
+
+    // Sort nodes within each category by name
+    for (const cat of Object.keys(groups)) {
+      groups[cat].sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    // Return sorted by category name
+    return Object.fromEntries(
+      Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
+    );
   }, [nodeTypes, searchTerm]);
 
   const isRunning = flow?.runtime_status === 'running';
@@ -580,25 +617,23 @@ export function FlowEditorPage() {
               </div>
             </div>
             <ScrollArea className="flex-1">
-              <div className="p-2">
+              <div className="p-2 space-y-4">
                 {Object.entries(groupedNodeTypes).map(([category, types]) => (
-                  <div key={category} className="mb-4">
+                  <div key={category}>
                     <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-2">
                       {category}
                     </h3>
-                    <div className="space-y-1">
+                    <div className="space-y-2 px-1">
                       {types.map((nodeType) => (
-                        <button
+                        <div
                           key={nodeType.type}
                           onClick={() => handleAddNode(nodeType)}
-                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-secondary transition-colors group"
                         >
-                          <div className="flex items-center justify-between">
-                            <span>{nodeType.name}</span>
-                            <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                          <div className="text-xs text-muted-foreground">{nodeType.type}</div>
-                        </button>
+                          <PaletteNode
+                            nodeType={nodeType}
+                            onDragStart={handleDragStart}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -621,12 +656,14 @@ export function FlowEditorPage() {
                   nodeTypes={nodeTypes}
                   selectedNodeId={selectedNodeId}
                   expandedNodes={expandedNodes}
+                  errorNodeIds={errorNodeIds}
                   onSelectNode={setSelectedNodeId}
                   onUpdateNode={handleUpdateNode}
                   onDeleteNode={handleDeleteNode}
                   onAddWire={handleAddWire}
                   onDeleteWire={handleDeleteWire}
                   onToggleNodeExpanded={handleToggleNodeExpanded}
+                  onDrop={handleCanvasDrop}
                 />
               </ReactFlowProvider>
             )}
@@ -801,10 +838,10 @@ function ExpandableDebugEntry({
   );
 }
 
-// Event types to show by default (debug output and flow lifecycle)
-const DEFAULT_VISIBLE_TYPES = new Set(['debug', 'flow.start', 'flow.stop']);
+// Event types to show by default (debug output, flow lifecycle, and errors)
+const DEFAULT_VISIBLE_TYPES = new Set(['debug', 'flow.start', 'flow.stop', 'flow.error', 'node.error']);
 // All available event types for filtering
-const ALL_EVENT_TYPES = ['debug', 'flow.start', 'flow.stop'];
+const ALL_EVENT_TYPES = ['debug', 'flow.start', 'flow.stop', 'flow.error', 'node.error'];
 
 function DebugPanel({
   events,

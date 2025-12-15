@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 export type EventType =
   | 'flow.start'
   | 'flow.stop'
+  | 'flow.error'
+  | 'node.error'
   | 'debug';
 
 export interface WSEvent {
@@ -154,8 +156,14 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
 /**
  * Hook for subscribing to events for a specific flow.
  */
-export function useFlowEvents(flowId: string | null) {
+export function useFlowEvents(flowId: string | null, onEvent?: (event: WSEvent) => void) {
   const [flowEvents, setFlowEvents] = useState<WSEvent[]>([]);
+  const onEventRef = useRef(onEvent);
+
+  // Keep callback ref updated
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
 
   const handleEvent = useCallback(
     (event: WSEvent) => {
@@ -164,6 +172,8 @@ export function useFlowEvents(flowId: string | null) {
           const next = [...prev, event];
           return next.slice(-500); // Keep last 500 events for this flow
         });
+        // Call optional external handler
+        onEventRef.current?.(event);
       }
     },
     [flowId]
