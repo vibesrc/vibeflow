@@ -140,8 +140,8 @@ export function FlowEditorPage() {
   const handleFlowEvent = useCallback((event: WSEvent) => {
     if (event.type === 'node.error' && event.node_id) {
       setErrorNodeIds((prev) => new Set([...prev, event.node_id!]));
-    } else if (event.type === 'flow.start') {
-      // Clear errors when flow restarts
+    } else if (event.type === 'flow.stop') {
+      // Clear errors when flow stops (so next start has clean slate)
       setErrorNodeIds(new Set());
     }
   }, []);
@@ -253,7 +253,22 @@ export function FlowEditorPage() {
     updateMutation.mutate({ content });
   }, [flowDefinition, updateMutation]);
 
-  // Keyboard shortcuts for undo/redo
+  // Global Ctrl+S handler - always saves regardless of focus (uses capture phase)
+  useEffect(() => {
+    const handleGlobalSave = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (hasUnsavedChanges && flowDefinition) {
+          handleSave();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalSave, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalSave, { capture: true });
+  }, [hasUnsavedChanges, flowDefinition, handleSave]);
+
+  // Keyboard shortcuts for undo/redo (only when not in input fields)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Check if user is typing in an input field
@@ -279,19 +294,11 @@ export function FlowEditorPage() {
           setHasUnsavedChanges(true);
         }
       }
-
-      // Ctrl+S or Cmd+S for save
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        if (hasUnsavedChanges && flowDefinition) {
-          handleSave();
-        }
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canUndo, canRedo, undo, redo, hasUnsavedChanges, flowDefinition, handleSave]);
+  }, [canUndo, canRedo, undo, redo]);
 
   // Track dragged node type for drag and drop
   const draggedNodeTypeRef = useRef<NodeType | null>(null);
@@ -838,6 +845,60 @@ function ExpandableDebugEntry({
   );
 }
 
+// Expandable error entry component
+function ExpandableErrorEntry({
+  timestamp,
+  nodeName,
+  message,
+}: {
+  timestamp: string;
+  nodeName?: string;
+  message: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Check if message is long enough to be expandable
+  const isExpandable = message.length > 60 || message.includes('\n');
+
+  // Truncated preview
+  const messagePreview = useMemo(() => {
+    const firstLine = message.split('\n')[0];
+    return firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine;
+  }, [message]);
+
+  return (
+    <div className="border-b border-border/30 bg-destructive/10 border-l-2 border-l-destructive">
+      <button
+        onClick={() => isExpandable && setIsExpanded(!isExpanded)}
+        className={cn(
+          "w-full text-left py-1.5 px-2 flex items-start gap-1.5 text-xs",
+          isExpandable && "cursor-pointer"
+        )}
+      >
+        {isExpandable ? (
+          isExpanded ? (
+            <ChevronDown className="w-3 h-3 mt-0.5 text-destructive shrink-0" />
+          ) : (
+            <ChevronRight className="w-3 h-3 mt-0.5 text-destructive shrink-0" />
+          )
+        ) : (
+          <AlertCircle className="w-3 h-3 mt-0.5 text-destructive shrink-0" />
+        )}
+        <span className="text-muted-foreground shrink-0">{timestamp}</span>
+        {nodeName && <span className="text-cyan-400 font-medium shrink-0">{nodeName}</span>}
+        {!isExpanded && (
+          <span className="text-destructive truncate">{messagePreview}</span>
+        )}
+      </button>
+      {isExpanded && (
+        <pre className="px-2 pb-2 pl-7 text-xs text-destructive whitespace-pre-wrap break-all font-mono">
+          {message}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 // Event types to show by default (debug output, flow lifecycle, and errors)
 const DEFAULT_VISIBLE_TYPES = new Set(['debug', 'flow.start', 'flow.stop', 'flow.error', 'node.error']);
 // All available event types for filtering
@@ -979,14 +1040,12 @@ function DebugPanel({
       const nodeName = event.node_id ? getNodeName(event.node_id) : undefined;
 
       return (
-        <div key={index} className="py-1.5 px-2 text-xs bg-destructive/10 border-l-2 border-destructive">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">{timestamp}</span>
-            <AlertCircle className="w-3 h-3 text-destructive" />
-            {nodeName && <span className="text-cyan-400">{nodeName}</span>}
-          </div>
-          <div className="text-destructive mt-0.5">{message}</div>
-        </div>
+        <ExpandableErrorEntry
+          key={index}
+          timestamp={timestamp}
+          nodeName={nodeName}
+          message={message}
+        />
       );
     }
 

@@ -74,6 +74,10 @@ export async function restartFlow(id: string): Promise<void> {
   await fetchApi(`/flows/${id}/restart`, { method: 'POST' });
 }
 
+export async function getFlowErrors(id: string): Promise<Record<string, string>> {
+  return fetchApi<Record<string, string>>(`/flows/${id}/errors`);
+}
+
 // Node Types
 export async function listNodeTypes(): Promise<NodeType[]> {
   return fetchApi<NodeType[]>('/node-types');

@@ -31,6 +31,9 @@ type Runtime struct {
 
 	// Message channels for each node - carries both message and input port
 	nodeChans map[string]chan *routedMessage
+
+	// Track node errors for API queries
+	nodeErrors map[string]string // nodeID -> error message
 }
 
 // routedMessage wraps a message with routing info
@@ -157,13 +160,14 @@ func New(registry *node.Registry, opts ...Option) *Runtime {
 		registry = node.DefaultRegistry
 	}
 	r := &Runtime{
-		registry:  registry,
-		plugins:   external.NewManager(),
-		logger:    slog.Default(),
-		nodes:     make(map[string]node.Node),
-		nodeNames: make(map[string]string),
-		wires:     make(map[string][]wire),
-		nodeChans: make(map[string]chan *routedMessage),
+		registry:   registry,
+		plugins:    external.NewManager(),
+		logger:     slog.Default(),
+		nodes:      make(map[string]node.Node),
+		nodeNames:  make(map[string]string),
+		wires:      make(map[string][]wire),
+		nodeChans:  make(map[string]chan *routedMessage),
+		nodeErrors: make(map[string]string),
 	}
 
 	for _, opt := range opts {
@@ -276,8 +280,15 @@ func (r *Runtime) Load(ctx context.Context, f *flow.Flow) error {
 		}
 
 		if err := n.Init(ctx, cfg, inputs, outputs); err != nil {
-			// Node init failed - log warning and skip this node (don't fail the whole flow)
+			// Node init failed - log warning, store error, emit error event, and skip this node
 			r.logger.Warn("failed to init node, skipping", "id", nodeDef.ID, "type", nodeDef.Type, "error", err)
+			r.nodeErrors[nodeDef.ID] = err.Error()
+			r.emitEvent(events.Event{
+				Type:   events.EventNodeError,
+				FlowID: r.flowID,
+				NodeID: nodeDef.ID,
+				Data:   &events.ErrorData{Error: err, Message: err.Error()},
+			})
 			continue
 		}
 
@@ -437,6 +448,9 @@ func (r *Runtime) runNode(ctx context.Context, nodeID string, n node.Node) {
 					"message", routed.msg.ID,
 					"error", err,
 				)
+				r.mu.Lock()
+				r.nodeErrors[nodeID] = err.Error()
+				r.mu.Unlock()
 				r.emitEvent(events.Event{
 					Type:   events.EventNodeError,
 					FlowID: flowID,
@@ -461,6 +475,17 @@ func (r *Runtime) emitEvent(e events.Event) {
 	if r.events != nil {
 		r.events.Emit(e)
 	}
+}
+
+// NodeErrors returns a copy of the current node errors map.
+func (r *Runtime) NodeErrors() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	errors := make(map[string]string, len(r.nodeErrors))
+	for k, v := range r.nodeErrors {
+		errors[k] = v
+	}
+	return errors
 }
 
 type emitter struct {

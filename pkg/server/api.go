@@ -46,6 +46,7 @@ func (a *API) setupRoutes() {
 	a.mux.HandleFunc("POST /api/flows/{id}/start", a.handleStartFlow)
 	a.mux.HandleFunc("POST /api/flows/{id}/stop", a.handleStopFlow)
 	a.mux.HandleFunc("POST /api/flows/{id}/restart", a.handleRestartFlow)
+	a.mux.HandleFunc("GET /api/flows/{id}/errors", a.handleGetFlowErrors)
 
 	// Node types
 	a.mux.HandleFunc("GET /api/node-types", a.handleListNodeTypes)
@@ -313,6 +314,17 @@ func (a *API) handleRestartFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.json(w, http.StatusOK, map[string]string{"status": "restarted"})
+}
+
+func (a *API) handleGetFlowErrors(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	errors := a.engine.GetNodeErrors(id)
+	if errors == nil {
+		errors = make(map[string]string)
+	}
+
+	a.json(w, http.StatusOK, errors)
 }
 
 // Node type handlers

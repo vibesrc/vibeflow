@@ -231,6 +231,8 @@ export function CodeEditor({
         <DialogContent
           className="p-0 gap-0 overflow-hidden flex flex-col"
           style={{ width: '95vw', maxWidth: '1400px', height: '85vh' }}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
         >
           <DialogHeader className="px-4 py-3 border-b border-border flex-row items-center justify-between space-y-0 shrink-0">
             <DialogTitle className="text-sm font-medium">

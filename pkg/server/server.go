@@ -70,7 +70,7 @@ func New(cfg *Config) (*Server, error) {
 	})
 
 	// Create WebSocket hub for real-time events
-	wsHub := NewWSHub(eventBus)
+	wsHub := NewWSHub(eventBus, engine.GetAllNodeErrors)
 
 	// Create API
 	api := NewAPI(engine, store)

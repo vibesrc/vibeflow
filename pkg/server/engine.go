@@ -293,3 +293,31 @@ func (e *Engine) AvailableNodeTypes() []string {
 func (e *Engine) Plugins() *PluginManager {
 	return e.plugins
 }
+
+// GetNodeErrors returns the current node errors for a running flow.
+func (e *Engine) GetNodeErrors(id string) map[string]string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	instance, ok := e.runtimes[id]
+	if !ok {
+		return nil
+	}
+	return instance.runtime.NodeErrors()
+}
+
+// GetAllNodeErrors returns current node errors for all running flows.
+// Returns map[flowID]map[nodeID]errorMessage
+func (e *Engine) GetAllNodeErrors() map[string]map[string]string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	result := make(map[string]map[string]string)
+	for id, instance := range e.runtimes {
+		errors := instance.runtime.NodeErrors()
+		if len(errors) > 0 {
+			result[id] = errors
+		}
+	}
+	return result
+}

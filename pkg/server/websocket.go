@@ -28,10 +28,15 @@ type WSMessage struct {
 	Data      any       `json:"data,omitempty"`
 }
 
+// ErrorSnapshotFunc returns current node errors for all running flows.
+// Returns map[flowID]map[nodeID]errorMessage
+type ErrorSnapshotFunc func() map[string]map[string]string
+
 // WSHub manages WebSocket connections and broadcasts events.
 type WSHub struct {
-	bus    *events.Bus
-	logger *slog.Logger
+	bus            *events.Bus
+	logger         *slog.Logger
+	errorSnapshot  ErrorSnapshotFunc
 
 	// Connected clients
 	clients   map[*wsClient]bool
@@ -52,12 +57,13 @@ type wsClient struct {
 }
 
 // NewWSHub creates a new WebSocket hub.
-func NewWSHub(bus *events.Bus) *WSHub {
+func NewWSHub(bus *events.Bus, errorSnapshot ErrorSnapshotFunc) *WSHub {
 	hub := &WSHub{
-		bus:     bus,
-		logger:  slog.Default(),
-		clients: make(map[*wsClient]bool),
-		done:    make(chan struct{}),
+		bus:           bus,
+		logger:        slog.Default(),
+		errorSnapshot: errorSnapshot,
+		clients:       make(map[*wsClient]bool),
+		done:          make(chan struct{}),
 	}
 
 	// Subscribe to all events
@@ -187,6 +193,38 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Start goroutines for reading and writing
 	go client.writePump()
 	go client.readPump()
+
+	// Send current error snapshot to new client
+	h.sendErrorSnapshot(client)
+}
+
+// sendErrorSnapshot sends current node errors to a client as node.error events.
+func (h *WSHub) sendErrorSnapshot(client *wsClient) {
+	if h.errorSnapshot == nil {
+		return
+	}
+
+	allErrors := h.errorSnapshot()
+	for flowID, nodeErrors := range allErrors {
+		for nodeID, message := range nodeErrors {
+			msg := WSMessage{
+				Type:      "node.error",
+				Timestamp: time.Now(),
+				FlowID:    flowID,
+				NodeID:    nodeID,
+				Data:      map[string]string{"message": message},
+			}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			select {
+			case client.send <- data:
+			default:
+				// Buffer full, skip
+			}
+		}
+	}
 }
 
 // ClientCount returns the number of connected clients.
