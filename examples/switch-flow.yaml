@@ -55,14 +55,21 @@ nodes:
 wires:
   - from: inject
     to: counter
+    output: default
+    input: default
   - from: counter
     to: router
+    output: default
+    input: default
   - from: router
     to: debug_low
     output: low
+    input: default
   - from: router
     to: debug_medium
     output: medium
+    input: default
   - from: router
     to: debug_high
     output: high
+    input: default

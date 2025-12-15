@@ -33,5 +33,9 @@ nodes:
 wires:
   - from: inject1
     to: script1
+    output: default
+    input: default
   - from: script1
     to: debug1
+    output: default
+    input: default

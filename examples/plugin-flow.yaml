@@ -34,7 +34,13 @@ nodes:
 wires:
   - from: inject
     to: echo
+    output: default
+    input: default
   - from: echo
     to: counter
+    output: default
+    input: default
   - from: counter
     to: debug
+    output: default
+    input: default

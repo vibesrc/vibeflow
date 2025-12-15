@@ -82,15 +82,29 @@ nodes:
 wires:
   - from: inject_array
     to: set_items
+    output: default
+    input: default
   - from: set_items
     to: split_items
+    output: default
+    input: default
   - from: split_items
     to: filter_b
+    output: default
+    input: default
   - from: filter_b
     to: process_delay
+    output: default
+    input: default
   - from: process_delay
     to: format_item
+    output: default
+    input: default
   - from: format_item
     to: join_items
+    output: default
+    input: default
   - from: join_items
     to: debug_output
+    output: default
+    input: default
