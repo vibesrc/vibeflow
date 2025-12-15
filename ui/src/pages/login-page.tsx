@@ -99,7 +99,7 @@ export function LoginPage() {
                 className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
                 disabled={loading}
               >
-                <Lock className="w-4 h-4 mr-2" />
+                <Lock className="w-4 h-4" />
                 {loading ? 'Authenticating...' : 'Authenticate'}
               </Button>
             </form>

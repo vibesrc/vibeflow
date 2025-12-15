@@ -42,3 +42,5 @@ node_modules/
 data/
 .db
 .sqlite
+# Vite cache
+.vite/

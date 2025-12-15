@@ -6,6 +6,9 @@ import { getFlow, updateFlow, listNodeTypes, startFlow, stopFlow } from '@/api';
 import type { NodeType, FlowDefinition, NodeDefinition, Wire } from '@/api';
 import { useFlowHistory } from '@/hooks/use-flow-history';
 import { useFlowEvents, type WSEvent, type ConnectionStatus } from '@/hooks/use-websocket';
+import { useMinDuration } from '@/hooks/use-min-duration';
+import { Spinner } from '@/components/ui/spinner';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +42,6 @@ import {
   ChevronDown,
   Pause,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { FlowCanvas } from '@/components/flow-canvas';
 import { NodeConfigPanel } from '@/components/node-config-panel';
@@ -194,28 +196,30 @@ export function FlowEditorPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flow', id] });
       setHasUnsavedChanges(false);
-      toast.success('Flow saved');
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to save flow'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to save'),
   });
 
   const startMutation = useMutation({
     mutationFn: () => startFlow(id!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flow', id] });
-      toast.success('Flow started');
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to start flow'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to start'),
   });
 
   const stopMutation = useMutation({
     mutationFn: () => stopFlow(id!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flow', id] });
-      toast.success('Flow stopped');
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to stop flow'),
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to stop'),
   });
+
+  // Extend loading states to prevent flash
+  const isSaving = useMinDuration(updateMutation.isPending);
+  const isStarting = useMinDuration(startMutation.isPending);
+  const isStopping = useMinDuration(stopMutation.isPending);
 
   const handleSave = useCallback(() => {
     if (!flowDefinition) return;
@@ -522,9 +526,9 @@ export function FlowEditorPage() {
               variant="secondary"
               size="sm"
               onClick={() => stopMutation.mutate()}
-              disabled={stopMutation.isPending}
+              disabled={isStopping}
             >
-              <Square className="w-4 h-4 mr-2" />
+              {isStopping ? <Spinner /> : <Square className="w-4 h-4" />}
               Stop
             </Button>
           ) : (
@@ -532,9 +536,9 @@ export function FlowEditorPage() {
               variant="secondary"
               size="sm"
               onClick={() => startMutation.mutate()}
-              disabled={startMutation.isPending}
+              disabled={isStarting}
             >
-              <Play className="w-4 h-4 mr-2" />
+              {isStarting ? <Spinner /> : <Play className="w-4 h-4" />}
               Start
             </Button>
           )}
@@ -542,9 +546,9 @@ export function FlowEditorPage() {
           <Button
             size="sm"
             onClick={handleSave}
-            disabled={!hasUnsavedChanges || updateMutation.isPending}
+            disabled={!hasUnsavedChanges || isSaving}
           >
-            <Save className="w-4 h-4 mr-2" />
+            {isSaving ? <Spinner /> : <Save className="w-4 h-4" />}
             Save
           </Button>
         </div>

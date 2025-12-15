@@ -1,5 +1,9 @@
 - all ts/js files should be kebab-case
 
+## UI / shadcn Rules
+
+- NEVER use `mr-2` or margin classes on icons inside shadcn Button components - shadcn already handles icon spacing automatically
+
 ## Development Commands
 
 - `make run` - Build and run the server (use this for dev)

@@ -59,7 +59,6 @@ export function FlowListPage() {
       setCreateDialogOpen(false);
       setNewFlowName('');
       setNewFlowDescription('');
-      toast.success('Flow created');
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to create flow'),
   });
@@ -68,7 +67,6 @@ export function FlowListPage() {
     mutationFn: deleteFlow,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flows'] });
-      toast.success('Flow deleted');
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to delete flow'),
   });
@@ -77,7 +75,6 @@ export function FlowListPage() {
     mutationFn: startFlow,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flows'] });
-      toast.success('Flow started');
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to start flow'),
   });
@@ -86,7 +83,6 @@ export function FlowListPage() {
     mutationFn: stopFlow,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flows'] });
-      toast.success('Flow stopped');
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to stop flow'),
   });
