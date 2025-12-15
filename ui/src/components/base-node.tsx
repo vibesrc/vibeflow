@@ -4,21 +4,36 @@ import { cn } from "@/lib/utils";
 
 interface BaseNodeProps extends ComponentProps<"div"> {
   selected?: boolean;
+  disabled?: boolean;
+  hasError?: boolean;
 }
 
-export function BaseNode({ className, selected, ...props }: BaseNodeProps) {
+export function BaseNode({ className, selected, disabled, hasError, ...props }: BaseNodeProps) {
   return (
     <div
       data-selected={selected || undefined}
+      data-disabled={disabled || undefined}
+      data-error={hasError || undefined}
       className={cn(
         // Industrial control room styling
         "group bg-card text-card-foreground relative rounded border",
         "border-[oklch(0.35_0.02_260)]",
-        "transition-[border-color,box-shadow] duration-150",
-        // Hover glow effect - amber
-        "hover:border-[oklch(0.78_0.18_75)] hover:shadow-[0_0_12px_oklch(0.78_0.18_75_/_0.2)]",
-        // Selected state - same amber as hover
-        selected && "border-[oklch(0.78_0.18_75)] shadow-[0_0_16px_oklch(0.78_0.18_75_/_0.3)]",
+        "transition-[border-color,box-shadow,opacity] duration-150",
+        // Disabled state - muted and striped
+        disabled && [
+          "opacity-50",
+          "border-dashed border-[oklch(0.4_0.01_260)]",
+          "bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,oklch(0.2_0.01_260_/_0.3)_4px,oklch(0.2_0.01_260_/_0.3)_8px)]",
+        ],
+        // Error state - red glow (takes precedence over selected)
+        hasError && !disabled && [
+          "border-[oklch(0.65_0.25_25)]",
+          "shadow-[0_0_16px_oklch(0.65_0.25_25_/_0.4)]",
+        ],
+        // Hover glow effect - amber (not when disabled or error)
+        !disabled && !hasError && "hover:border-[oklch(0.78_0.18_75)] hover:shadow-[0_0_12px_oklch(0.78_0.18_75_/_0.2)]",
+        // Selected state - amber (not when disabled or error)
+        selected && !disabled && !hasError && "border-[oklch(0.78_0.18_75)] shadow-[0_0_16px_oklch(0.78_0.18_75_/_0.3)]",
         className,
       )}
       tabIndex={0}

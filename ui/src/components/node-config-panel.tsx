@@ -38,11 +38,6 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
   // Get config schema for this node type
   const configSchema = useMemo(() => nodeType?.config || [], [nodeType]);
 
-  // Get fields from schema that aren't in the current config
-  const missingSchemaFields = useMemo(() => {
-    return configSchema.filter(spec => !(spec.name in localConfig));
-  }, [configSchema, localConfig]);
-
   // Custom fields that aren't in the schema
   const customFields = useMemo(() => {
     const schemaNames = new Set(configSchema.map(s => s.name));
@@ -82,11 +77,6 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
     delete updated[key];
     setLocalConfig(updated);
     onUpdate({ config: updated });
-  };
-
-  const handleAddSchemaField = (spec: ConfigSpec) => {
-    const defaultValue = spec.default ?? getDefaultForType(spec.type);
-    handleConfigChange(spec.name, defaultValue);
   };
 
   return (
@@ -148,16 +138,18 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
             Configuration
           </h3>
           <div className="space-y-3">
-            {/* Schema-defined fields */}
+            {/* Schema-defined fields - always show all */}
             {configSchema.map((spec) => {
-              if (!(spec.name in localConfig)) return null;
+              // Use value from localConfig, or fall back to spec default, or type default
+              const value = spec.name in localConfig
+                ? localConfig[spec.name]
+                : (spec.default ?? getDefaultForType(spec.type));
               return (
                 <SchemaConfigField
                   key={spec.name}
                   spec={spec}
-                  value={localConfig[spec.name]}
+                  value={value}
                   onChange={(v) => handleConfigChange(spec.name, v)}
-                  onRemove={() => handleRemoveConfig(spec.name)}
                 />
               );
             })}
@@ -173,37 +165,14 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
               />
             ))}
 
-            {Object.keys(localConfig).length === 0 && configSchema.length === 0 && (
+            {configSchema.length === 0 && customFields.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-2">
                 No configuration
               </p>
             )}
 
-            {/* Add missing schema fields */}
-            {missingSchemaFields.length > 0 && (
-              <div className="pt-2 border-t border-border/50">
-                <Label className="text-xs text-muted-foreground mb-2 block">Add field from schema</Label>
-                <div className="flex flex-wrap gap-1">
-                  {missingSchemaFields.map((spec) => (
-                    <Button
-                      key={spec.name}
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs"
-                      onClick={() => handleAddSchemaField(spec)}
-                      title={spec.description}
-                    >
-                      <Plus className="w-3 h-3 mr-1" />
-                      {spec.name}
-                      {spec.required && <span className="text-destructive ml-1">*</span>}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Add custom config */}
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-2 border-t border-border/50">
               <Input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
@@ -391,12 +360,10 @@ function SchemaConfigField({
   spec,
   value,
   onChange,
-  onRemove,
 }: {
   spec: ConfigSpec;
   value: unknown;
   onChange: (value: unknown) => void;
-  onRemove: () => void;
 }) {
   const hasOptions = spec.options && spec.options.length > 0;
   // Use items schema if available for arrays
@@ -404,19 +371,9 @@ function SchemaConfigField({
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <Label className="text-xs font-mono">{spec.name}</Label>
-          {spec.required && <span className="text-destructive text-xs">*</span>}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5"
-          onClick={onRemove}
-        >
-          <X className="w-3 h-3" />
-        </Button>
+      <div className="flex items-center gap-1">
+        <Label className="text-xs font-mono">{spec.name}</Label>
+        {spec.required && <span className="text-destructive text-xs">*</span>}
       </div>
       {spec.description && (
         <p className="text-[10px] text-muted-foreground">{spec.description}</p>

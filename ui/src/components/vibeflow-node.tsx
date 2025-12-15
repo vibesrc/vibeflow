@@ -12,6 +12,8 @@ export type VibeflowNodeData = {
   inputs?: PortInfo[];
   outputs?: PortInfo[];
   expanded?: boolean;
+  disabled?: boolean;
+  hasError?: boolean;
   onToggleExpanded?: (nodeId: string, expanded: boolean) => void;
 };
 
@@ -68,8 +70,8 @@ export const VibeflowNode = memo(function VibeflowNode({
   selected,
 }: NodeProps<VibeflowNodeType>) {
   const expanded = data.expanded ?? false;
-  const inputs = data.inputs ?? [{ name: 'input' }];
-  const baseOutputs = data.outputs ?? [{ name: 'output' }];
+  const inputs = data.inputs ?? [];
+  const baseOutputs = data.outputs ?? [];
 
   // Compute dynamic outputs based on config (e.g., switch rules define output ports)
   const outputs = useMemo(
@@ -120,9 +122,14 @@ export const VibeflowNode = memo(function VibeflowNode({
     return spacing * (index + 1);
   };
 
+  const disabled = data.disabled ?? false;
+  const hasError = data.hasError ?? false;
+
   return (
     <BaseNode
       selected={selected}
+      disabled={disabled}
+      hasError={hasError}
       className="min-w-[160px] transition-[height] duration-200"
       style={{ height: nodeHeight }}
     >
