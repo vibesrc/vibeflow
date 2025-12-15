@@ -171,6 +171,15 @@ func (s *Store) UpdateFlowStatus(id, status string) error {
 	return err
 }
 
+// SetFlowEnabled updates just the enabled field.
+func (s *Store) SetFlowEnabled(id string, enabled bool) error {
+	_, err := s.db.Exec(
+		`UPDATE flows SET enabled=?, updated_at=? WHERE id=?`,
+		enabled, time.Now(), id,
+	)
+	return err
+}
+
 // GetSetting retrieves a setting value.
 func (s *Store) GetSetting(key string) (string, error) {
 	var value string

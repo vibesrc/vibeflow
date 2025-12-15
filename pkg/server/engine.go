@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/bherbruck/vibeflow/pkg/events"
 	"github.com/bherbruck/vibeflow/pkg/flow"
 	"github.com/bherbruck/vibeflow/pkg/node"
 	"github.com/bherbruck/vibeflow/pkg/runtime"
@@ -17,11 +18,13 @@ type Engine struct {
 	logger    *slog.Logger
 	pluginDir string
 	dataDir   string
+	events    *events.Bus
 
 	mu        sync.RWMutex
 	runtimes  map[string]*flowInstance
 	plugins   *PluginManager
 	cancelFns map[string]context.CancelFunc
+	doneChs   map[string]chan struct{} // Signals when flow has fully stopped
 }
 
 type flowInstance struct {
@@ -33,8 +36,9 @@ type flowInstance struct {
 // EngineConfig configures the engine.
 type EngineConfig struct {
 	Store     *Store
-	PluginDir string // Directory for plugins
-	DataDir   string // Directory for runtime data
+	PluginDir string      // Directory for plugins
+	DataDir   string      // Directory for runtime data
+	Events    *events.Bus // Event bus for real-time events
 }
 
 // NewEngine creates a new flow engine.
@@ -44,10 +48,17 @@ func NewEngine(cfg *EngineConfig) *Engine {
 		logger:    slog.Default(),
 		pluginDir: cfg.PluginDir,
 		dataDir:   cfg.DataDir,
+		events:    cfg.Events,
 		runtimes:  make(map[string]*flowInstance),
 		plugins:   NewPluginManager(cfg.Store, cfg.PluginDir),
 		cancelFns: make(map[string]context.CancelFunc),
+		doneChs:   make(map[string]chan struct{}),
 	}
+}
+
+// Events returns the event bus.
+func (e *Engine) Events() *events.Bus {
+	return e.events
 }
 
 // Start initializes the engine and starts enabled flows.
@@ -125,16 +136,23 @@ func (e *Engine) StartFlow(ctx context.Context, id string) error {
 		}
 	}
 
-	// Create runtime
-	rt := runtime.New(node.DefaultRegistry)
+	// Create runtime with event bus
+	rt := runtime.New(node.DefaultRegistry, runtime.WithEventBus(e.events))
+	rt.SetFlowID(id)
 
 	// Create cancellable context for this flow
-	flowCtx, cancel := context.WithCancel(ctx)
+	// Use Background() so the flow isn't cancelled when the HTTP request completes
+	flowCtx, cancel := context.WithCancel(context.Background())
 	e.cancelFns[id] = cancel
+
+	// Create done channel to signal when flow has fully stopped
+	doneCh := make(chan struct{})
+	e.doneChs[id] = doneCh
 
 	// Load flow into runtime (it will use our plugin manager for external types)
 	if err := e.loadFlowWithPlugins(flowCtx, rt, f); err != nil {
 		cancel()
+		delete(e.doneChs, id)
 		return fmt.Errorf("failed to load flow into runtime: %w", err)
 	}
 
@@ -160,7 +178,11 @@ func (e *Engine) StartFlow(ctx context.Context, id string) error {
 		e.mu.Lock()
 		delete(e.runtimes, id)
 		delete(e.cancelFns, id)
+		delete(e.doneChs, id)
 		e.mu.Unlock()
+
+		// Signal that flow has fully stopped
+		close(doneCh)
 	}()
 
 	return nil
@@ -173,35 +195,38 @@ func (e *Engine) loadFlowWithPlugins(ctx context.Context, rt *runtime.Runtime, f
 	return rt.Load(ctx, f)
 }
 
-// StopFlow stops a running flow.
-func (e *Engine) StopFlow(id string) error {
+// StopFlow stops a running flow and returns a channel that closes when the flow has fully stopped.
+func (e *Engine) StopFlow(id string) (<-chan struct{}, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	cancel, ok := e.cancelFns[id]
 	if !ok {
-		return fmt.Errorf("flow %s is not running", id)
+		return nil, fmt.Errorf("flow %s is not running", id)
 	}
+
+	doneCh := e.doneChs[id]
 
 	e.logger.Info("stopping flow", "id", id)
 	cancel()
 
-	return nil
+	return doneCh, nil
 }
 
-// RestartFlow restarts a flow.
+// RestartFlow restarts a flow, waiting for the old instance to fully stop first.
 func (e *Engine) RestartFlow(ctx context.Context, id string) error {
-	// Stop if running
+	// Stop if running and wait for it to fully stop
 	e.mu.RLock()
 	_, running := e.runtimes[id]
 	e.mu.RUnlock()
 
 	if running {
-		if err := e.StopFlow(id); err != nil {
+		doneCh, err := e.StopFlow(id)
+		if err != nil {
 			return err
 		}
-		// Wait for it to stop (simple approach)
-		// TODO: Use a done channel
+		// Wait for the flow to fully stop before starting the new one
+		<-doneCh
 	}
 
 	return e.StartFlow(ctx, id)

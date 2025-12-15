@@ -254,9 +254,12 @@ func (a *API) handleUpdateFlow(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDeleteFlow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// Stop if running
+	// Stop if running and wait for it to stop
 	if a.engine.IsFlowRunning(id) {
-		a.engine.StopFlow(id)
+		doneCh, _ := a.engine.StopFlow(id)
+		if doneCh != nil {
+			<-doneCh
+		}
 	}
 
 	if err := a.store.DeleteFlow(id); err != nil {
@@ -277,16 +280,26 @@ func (a *API) handleStartFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mark flow as enabled so it starts on server restart
+	a.store.SetFlowEnabled(id, true)
+
 	a.json(w, http.StatusOK, map[string]string{"status": "started"})
 }
 
 func (a *API) handleStopFlow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if err := a.engine.StopFlow(id); err != nil {
+	doneCh, err := a.engine.StopFlow(id)
+	if err != nil {
 		a.error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Wait for flow to fully stop before responding
+	<-doneCh
+
+	// Mark flow as disabled so it doesn't start on server restart
+	a.store.SetFlowEnabled(id, false)
 
 	a.json(w, http.StatusOK, map[string]string{"status": "stopped"})
 }

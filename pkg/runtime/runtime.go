@@ -21,12 +21,13 @@ type Runtime struct {
 	logger   *slog.Logger
 	events   *events.Bus
 
-	mu       sync.RWMutex
-	flowID   string // Current flow ID
-	nodes    map[string]node.Node
-	wires    map[string][]wire // nodeID -> outgoing wires
-	running  bool
-	cancelFn context.CancelFunc
+	mu        sync.RWMutex
+	flowID    string // Current flow ID
+	nodes     map[string]node.Node
+	nodeNames map[string]string     // nodeID -> display name (for debug output)
+	wires     map[string][]wire     // nodeID -> outgoing wires
+	running   bool
+	cancelFn  context.CancelFunc
 
 	// Message channels for each node - carries both message and input port
 	nodeChans map[string]chan *routedMessage
@@ -93,11 +94,9 @@ func (o *outputHandle) Send(msg *message.Message) {
 		},
 	})
 
-	// If there's only one wire total from this node, route to it regardless of port name
-	singleWire := len(wires) == 1
-
+	// Route only to wires matching this exact output port - no fallbacks
 	for _, w := range wires {
-		if w.output == o.port || singleWire {
+		if w.output == o.port {
 			o.runtime.mu.RLock()
 			ch, ok := o.runtime.nodeChans[w.toNode]
 			o.runtime.mu.RUnlock()
@@ -162,6 +161,7 @@ func New(registry *node.Registry, opts ...Option) *Runtime {
 		plugins:   external.NewManager(),
 		logger:    slog.Default(),
 		nodes:     make(map[string]node.Node),
+		nodeNames: make(map[string]string),
 		wires:     make(map[string][]wire),
 		nodeChans: make(map[string]chan *routedMessage),
 	}
@@ -197,41 +197,31 @@ func (r *Runtime) Load(ctx context.Context, f *flow.Flow) error {
 	nodeOutputs := make(map[string]map[string]bool) // nodeID -> set of output port names
 
 	for _, w := range f.Wires {
-		output := w.Output
-		// Normalize port names - "output" and empty string both map to "default"
-		if output == "" || output == "output" {
-			output = "default"
-		}
-		input := w.Input
-		// Normalize port names - "input" and empty string both map to "default"
-		if input == "" || input == "input" {
-			input = "default"
-		}
-
+		// Use exact port names - no normalization
 		// Deduplicate: skip if we've seen this exact wire before
-		wireKey := fmt.Sprintf("%s:%s->%s:%s", w.From, output, w.To, input)
+		wireKey := fmt.Sprintf("%s:%s->%s:%s", w.From, w.Output, w.To, w.Input)
 		if seenWires[wireKey] {
-			r.logger.Warn("skipping duplicate wire", "from", w.From, "output", output, "to", w.To, "input", input)
+			r.logger.Warn("skipping duplicate wire", "from", w.From, "output", w.Output, "to", w.To, "input", w.Input)
 			continue
 		}
 		seenWires[wireKey] = true
 
 		r.wires[w.From] = append(r.wires[w.From], wire{
-			output: output,
+			output: w.Output,
 			toNode: w.To,
-			input:  input,
+			input:  w.Input,
 		})
 
 		// Track which ports are wired for each node
 		if nodeOutputs[w.From] == nil {
 			nodeOutputs[w.From] = make(map[string]bool)
 		}
-		nodeOutputs[w.From][output] = true
+		nodeOutputs[w.From][w.Output] = true
 
 		if nodeInputs[w.To] == nil {
 			nodeInputs[w.To] = make(map[string]bool)
 		}
-		nodeInputs[w.To][input] = true
+		nodeInputs[w.To][w.Input] = true
 	}
 
 	// Create and initialize nodes
@@ -293,6 +283,12 @@ func (r *Runtime) Load(ctx context.Context, f *flow.Flow) error {
 
 		r.nodes[nodeDef.ID] = n
 		r.nodeChans[nodeDef.ID] = make(chan *routedMessage, 100)
+		// Store the node name for debug output (use ID if name is empty)
+		name := nodeDef.Name
+		if name == "" {
+			name = nodeDef.ID
+		}
+		r.nodeNames[nodeDef.ID] = name
 
 		r.logger.Info("initialized node", "id", nodeDef.ID, "type", nodeDef.Type)
 
@@ -403,7 +399,16 @@ func (r *Runtime) runNode(ctx context.Context, nodeID string, n node.Node) {
 
 	r.mu.RLock()
 	flowID := r.flowID
+	nodeName := r.nodeNames[nodeID]
 	r.mu.RUnlock()
+
+	// Add DebugEmitter to context for debug node sidebar output
+	de := &debugEmitter{
+		runtime:  r,
+		nodeID:   nodeID,
+		nodeName: nodeName,
+	}
+	ctx = context.WithValue(ctx, node.DebugEmitterKey, de)
 
 	for {
 		select {
@@ -464,8 +469,10 @@ type emitter struct {
 }
 
 func (e *emitter) Emit(output string, msg *message.Message) {
+	// Output port name is required - no fallback to "default"
 	if output == "" {
-		output = "default"
+		e.runtime.logger.Error("emit called with empty output port", "node", e.nodeID)
+		return
 	}
 
 	e.runtime.mu.RLock()
@@ -485,12 +492,9 @@ func (e *emitter) Emit(output string, msg *message.Message) {
 		},
 	})
 
-	// If there's only one wire total from this node, route to it regardless of port name
-	// This lets node developers use any output name when they only have one output
-	singleWire := len(wires) == 1
-
+	// Route only to wires matching this exact output port - no fallbacks
 	for _, w := range wires {
-		if w.output == output || singleWire {
+		if w.output == output {
 			e.runtime.mu.RLock()
 			ch, ok := e.runtime.nodeChans[w.toNode]
 			e.runtime.mu.RUnlock()
@@ -508,6 +512,31 @@ func (e *emitter) Emit(output string, msg *message.Message) {
 			}
 		}
 	}
+}
+
+// debugEmitter implements node.DebugEmitter for the debug node.
+type debugEmitter struct {
+	runtime  *Runtime
+	nodeID   string
+	nodeName string
+}
+
+func (d *debugEmitter) Debug(topic string, payload any) {
+	d.runtime.mu.RLock()
+	flowID := d.runtime.flowID
+	d.runtime.mu.RUnlock()
+
+	d.runtime.emitEvent(events.Event{
+		Type:   events.EventDebug,
+		FlowID: flowID,
+		NodeID: d.nodeID,
+		Data: &events.DebugData{
+			NodeName: d.nodeName,
+			Topic:    topic,
+			Payload:  payload,
+			Level:    "log",
+		},
+	})
 }
 
 // Stop stops the runtime.

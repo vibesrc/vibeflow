@@ -105,6 +105,31 @@ type Emitter interface {
 	Emit(output string, msg *message.Message)
 }
 
+// DebugEmitter allows nodes to emit debug events to the UI sidebar.
+// Implementations are provided by the runtime and made available via context.
+type DebugEmitter interface {
+	// Debug emits a debug event that appears in the UI sidebar.
+	// topic is optional and can provide context (like Node-RED's msg.topic).
+	// payload is the data to display (will be JSON-serialized if not a string).
+	Debug(topic string, payload any)
+}
+
+// DebugEmitterKey is the context key for accessing the DebugEmitter.
+type debugEmitterKeyType struct{}
+
+// DebugEmitterKey is used to store/retrieve DebugEmitter from context.
+var DebugEmitterKey = debugEmitterKeyType{}
+
+// GetDebugEmitter retrieves the DebugEmitter from the context, or nil if not present.
+func GetDebugEmitter(ctx context.Context) DebugEmitter {
+	if v := ctx.Value(DebugEmitterKey); v != nil {
+		if de, ok := v.(DebugEmitter); ok {
+			return de
+		}
+	}
+	return nil
+}
+
 // Config holds the configuration for a node instance.
 type Config struct {
 	// ID is the unique node identifier in the flow

@@ -46,8 +46,8 @@ func (n *NodeDef) IsEnabled() bool {
 type Wire struct {
 	From   string `yaml:"from"`
 	To     string `yaml:"to"`
-	Output string `yaml:"output,omitempty"` // Default: "default"
-	Input  string `yaml:"input,omitempty"`  // Default: "default"
+	Output string `yaml:"output"` // Required: explicit output port name
+	Input  string `yaml:"input"`  // Required: explicit input port name
 }
 
 // LoadFromFile loads a flow from a YAML file.
@@ -95,7 +95,8 @@ func (f *Flow) Validate() error {
 		nodeIDs[n.ID] = true
 	}
 
-	// Validate wires
+	// Validate wires and check for duplicates
+	seenWires := make(map[string]bool)
 	for _, w := range f.Wires {
 		if w.From == "" {
 			return fmt.Errorf("wire missing 'from'")
@@ -103,12 +104,25 @@ func (f *Flow) Validate() error {
 		if w.To == "" {
 			return fmt.Errorf("wire missing 'to'")
 		}
+		if w.Output == "" {
+			return fmt.Errorf("wire from %s missing 'output' port", w.From)
+		}
+		if w.Input == "" {
+			return fmt.Errorf("wire to %s missing 'input' port", w.To)
+		}
 		if !nodeIDs[w.From] {
 			return fmt.Errorf("wire references unknown node: %s", w.From)
 		}
 		if !nodeIDs[w.To] {
 			return fmt.Errorf("wire references unknown node: %s", w.To)
 		}
+
+		// Check for duplicate wires - use exact port names (no normalization)
+		wireKey := fmt.Sprintf("%s:%s->%s:%s", w.From, w.Output, w.To, w.Input)
+		if seenWires[wireKey] {
+			return fmt.Errorf("duplicate wire: %s:%s -> %s:%s", w.From, w.Output, w.To, w.Input)
+		}
+		seenWires[wireKey] = true
 	}
 
 	return nil

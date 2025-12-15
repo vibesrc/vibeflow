@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bherbruck/vibeflow/pkg/events"
 	"github.com/bherbruck/vibeflow/ui"
 )
 
@@ -18,6 +19,8 @@ type Server struct {
 	store      *Store
 	engine     *Engine
 	api        *API
+	events     *events.Bus
+	wsHub      *WSHub
 	httpServer *http.Server
 }
 
@@ -48,6 +51,9 @@ func New(cfg *Config) (*Server, error) {
 
 	logger := slog.Default()
 
+	// Create event bus
+	eventBus := events.NewBus()
+
 	// Create store
 	dbPath := cfg.DataDir + "/vibeflow.db"
 	store, err := NewStore(dbPath)
@@ -55,12 +61,16 @@ func New(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
 
-	// Create engine
+	// Create engine with event bus
 	engine := NewEngine(&EngineConfig{
 		Store:     store,
 		PluginDir: cfg.PluginDir,
 		DataDir:   cfg.DataDir,
+		Events:    eventBus,
 	})
+
+	// Create WebSocket hub for real-time events
+	wsHub := NewWSHub(eventBus)
 
 	// Create API
 	api := NewAPI(engine, store)
@@ -70,6 +80,9 @@ func New(cfg *Config) (*Server, error) {
 
 	// API routes
 	mux.Handle("/api/", api)
+
+	// WebSocket endpoint for real-time events
+	mux.Handle("/api/ws", wsHub)
 
 	// Serve embedded UI assets
 	distFS, err := fs.Sub(ui.Assets, "dist")
@@ -116,6 +129,8 @@ func New(cfg *Config) (*Server, error) {
 		store:      store,
 		engine:     engine,
 		api:        api,
+		events:     eventBus,
+		wsHub:      wsHub,
 		httpServer: httpServer,
 	}, nil
 }
@@ -123,6 +138,9 @@ func New(cfg *Config) (*Server, error) {
 // Start starts the server.
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("starting engine")
+
+	// Start the WebSocket hub for real-time events
+	s.wsHub.Start()
 
 	// Start the flow engine
 	if err := s.engine.Start(ctx); err != nil {
@@ -149,6 +167,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Error("HTTP server shutdown error", "error", err)
 	}
+
+	// Stop WebSocket hub
+	s.wsHub.Stop()
 
 	// Shutdown engine
 	if err := s.engine.Shutdown(ctx); err != nil {
