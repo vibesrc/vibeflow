@@ -1,10 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ReactFlowProvider } from '@xyflow/react';
 import { getFlow, updateFlow, listNodeTypes, startFlow, stopFlow } from '@/api';
 import type { NodeType, FlowDefinition, NodeDefinition, Wire } from '@/api';
 import { useFlowHistory } from '@/hooks/use-flow-history';
+import { useFlowEvents, type WSEvent, type ConnectionStatus } from '@/hooks/use-websocket';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -22,16 +23,21 @@ import {
   Square,
   Save,
   Plus,
-  Trash2,
   Settings,
   Boxes,
-  Cable,
   AlertCircle,
   Search,
   Variable,
   X,
   Undo2,
   Redo2,
+  Bug,
+  Wifi,
+  WifiOff,
+  Trash2 as ClearIcon,
+  ChevronRight,
+  ChevronDown,
+  Pause,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -126,6 +132,9 @@ export function FlowEditorPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
+  // WebSocket for real-time events
+  const { status: wsStatus, events: flowEvents, clearEvents } = useFlowEvents(id ?? null);
+
   const defaultLayout = useMemo(() => getPanelLayout(), []);
 
   // Load node UI state (expanded) from localStorage when flow id changes
@@ -210,7 +219,22 @@ export function FlowEditorPage() {
 
   const handleSave = useCallback(() => {
     if (!flowDefinition) return;
-    const content = yaml.dump(flowDefinition, { noRefs: true, lineWidth: -1 });
+
+    // Deduplicate wires before saving
+    const seenWires = new Set<string>();
+    const uniqueWires = flowDefinition.wires.filter((w) => {
+      const key = `${w.from}:${w.output}->${w.to}:${w.input}`;
+      if (seenWires.has(key)) return false;
+      seenWires.add(key);
+      return true;
+    });
+
+    const cleanedFlow = {
+      ...flowDefinition,
+      wires: uniqueWires,
+    };
+
+    const content = yaml.dump(cleanedFlow, { noRefs: true, lineWidth: -1 });
     updateMutation.mutate({ content });
   }, [flowDefinition, updateMutation]);
 
@@ -302,6 +326,11 @@ export function FlowEditorPage() {
 
   const handleAddWire = useCallback((from: string, to: string, output?: string, input?: string) => {
     if (!flowDefinition) return;
+    // Port names are required - if not provided, cannot create wire
+    if (!output || !input) {
+      console.error('Cannot create wire without explicit output and input port names');
+      return;
+    }
 
     // Check if wire already exists
     const exists = flowDefinition.wires.some(
@@ -319,20 +348,18 @@ export function FlowEditorPage() {
 
   const handleDeleteWire = useCallback((from: string, to: string, output?: string, input?: string) => {
     if (!flowDefinition) return;
+    // Port names are required - if not provided, cannot match wire
+    if (!output || !input) {
+      console.error('Cannot delete wire without explicit output and input port names');
+      return;
+    }
 
     setFlowDefinition({
       ...flowDefinition,
       wires: flowDefinition.wires.filter((w) => {
-        // Match from/to
+        // Match from/to and exact port names - no fallbacks
         if (w.from !== from || w.to !== to) return true;
-        // Match output handle (default to 'output' if not specified)
-        const wireOutput = w.output || 'output';
-        const deleteOutput = output || 'output';
-        if (wireOutput !== deleteOutput) return true;
-        // Match input handle (default to 'input' if not specified)
-        const wireInput = w.input || 'input';
-        const deleteInput = input || 'input';
-        if (wireInput !== deleteInput) return true;
+        if (w.output !== output || w.input !== input) return true;
         // All match - delete this wire
         return false;
       }),
@@ -625,9 +652,14 @@ export function FlowEditorPage() {
                 <Boxes className="w-3.5 h-3.5" />
                 Nodes
               </TabsTrigger>
-              <TabsTrigger value="wires" className="text-xs gap-1.5">
-                <Cable className="w-3.5 h-3.5" />
-                Wires
+              <TabsTrigger value="debug" className="text-xs gap-1.5">
+                <Bug className="w-3.5 h-3.5" />
+                Debug
+                {flowEvents.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-primary/20 text-primary">
+                    {flowEvents.length}
+                  </span>
+                )}
               </TabsTrigger>
             </TabsList>
 
@@ -681,40 +713,359 @@ export function FlowEditorPage() {
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="wires" className="flex-1 m-0 overflow-hidden">
-              <ScrollArea className="h-full">
-                <div className="p-3 space-y-2">
-                  {flowDefinition?.wires.map((wire, i) => (
-                    <div
-                      key={`${wire.from}-${wire.to}-${i}`}
-                      className="px-3 py-2 rounded bg-secondary/50 text-sm flex items-center justify-between"
-                    >
-                      <div>
-                        <span className="text-cyan">{wire.from}</span>
-                        <span className="text-muted-foreground mx-2">→</span>
-                        <span className="text-amber">{wire.to}</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => handleDeleteWire(wire.from, wire.to)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  ))}
-                  {(!flowDefinition?.wires || flowDefinition.wires.length === 0) && (
-                    <div className="text-center text-muted-foreground text-sm py-8">
-                      No connections yet
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
+            <TabsContent value="debug" className="flex-1 m-0 overflow-hidden">
+              <DebugPanel
+                events={flowEvents}
+                wsStatus={wsStatus}
+                onClear={clearEvents}
+                nodes={flowDefinition?.nodes}
+              />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
       </ResizablePanelGroup>
+    </div>
+  );
+}
+
+// Expandable debug log entry component (like browser devtools)
+function ExpandableDebugEntry({
+  timestamp,
+  nodeName,
+  topic,
+  payload,
+}: {
+  timestamp: string;
+  nodeName: string;
+  topic?: string;
+  payload: unknown;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Format payload preview (single line, truncated)
+  const payloadPreview = useMemo(() => {
+    if (payload === null) return 'null';
+    if (payload === undefined) return 'undefined';
+    if (typeof payload === 'string') {
+      return payload.length > 80 ? payload.slice(0, 80) + '...' : payload;
+    }
+    const str = JSON.stringify(payload);
+    return str.length > 80 ? str.slice(0, 80) + '...' : str;
+  }, [payload]);
+
+  // Full formatted payload
+  const payloadFull = useMemo(() => {
+    if (typeof payload === 'string') return payload;
+    return JSON.stringify(payload, null, 2);
+  }, [payload]);
+
+  // Check if payload is expandable (object/array or long string)
+  const isExpandable = typeof payload === 'object' && payload !== null ||
+    (typeof payload === 'string' && payload.length > 80);
+
+  return (
+    <div className="border-b border-border/30 hover:bg-muted/30">
+      <button
+        onClick={() => isExpandable && setIsExpanded(!isExpanded)}
+        className={cn(
+          "w-full text-left py-1.5 px-2 flex items-start gap-1.5 text-xs",
+          isExpandable && "cursor-pointer"
+        )}
+      >
+        {isExpandable ? (
+          isExpanded ? (
+            <ChevronDown className="w-3 h-3 mt-0.5 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="w-3 h-3 mt-0.5 text-muted-foreground shrink-0" />
+          )
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+        <span className="text-muted-foreground shrink-0">{timestamp}</span>
+        <span className="text-purple-400 font-medium shrink-0">{nodeName}</span>
+        {topic && <span className="text-muted-foreground shrink-0">: {topic}</span>}
+        {!isExpanded && (
+          <span className="text-foreground/70 truncate font-mono">{payloadPreview}</span>
+        )}
+      </button>
+      {isExpanded && (
+        <pre className="px-2 pb-2 pl-7 text-xs text-foreground/90 whitespace-pre-wrap break-all font-mono bg-muted/20">
+          {payloadFull}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// Event types to show by default (debug output and flow lifecycle)
+const DEFAULT_VISIBLE_TYPES = new Set(['debug', 'flow.start', 'flow.stop']);
+// All available event types for filtering
+const ALL_EVENT_TYPES = ['debug', 'flow.start', 'flow.stop'];
+
+function DebugPanel({
+  events,
+  wsStatus,
+  onClear,
+  nodes,
+}: {
+  events: WSEvent[];
+  wsStatus: ConnectionStatus;
+  onClear: () => void;
+  nodes?: NodeDefinition[];
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(DEFAULT_VISIBLE_TYPES);
+  const [selectedNode, setSelectedNode] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [pausedEvents, setPausedEvents] = useState<WSEvent[] | null>(null);
+
+  // Use paused snapshot or live events
+  const displayEvents = pausedEvents ?? events;
+
+  // Get unique node IDs from display events
+  const nodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    displayEvents.forEach((e) => {
+      if (e.node_id) ids.add(e.node_id);
+    });
+    return Array.from(ids);
+  }, [displayEvents]);
+
+  // Filter events based on visible types and selected node
+  const filteredEvents = useMemo(() => {
+    return displayEvents.filter((e) => {
+      if (!visibleTypes.has(e.type)) return false;
+      if (selectedNode !== 'all' && e.node_id !== selectedNode) return false;
+      return true;
+    });
+  }, [displayEvents, visibleTypes, selectedNode]);
+
+  // Handle pause/resume
+  const handleTogglePause = useCallback(() => {
+    if (isPaused) {
+      // Resume: clear paused snapshot
+      setPausedEvents(null);
+    } else {
+      // Pause: capture current events
+      setPausedEvents([...events]);
+    }
+    setIsPaused(!isPaused);
+  }, [isPaused, events]);
+
+  // Auto-scroll to bottom when new events arrive (unless paused)
+  useEffect(() => {
+    if (scrollRef.current && !isPaused) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [filteredEvents, isPaused]);
+
+  const toggleType = (type: string) => {
+    setVisibleTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
+
+  const formatTimestamp = (ts: string) => {
+    try {
+      const date = new Date(ts);
+      return date.toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3,
+      });
+    } catch {
+      return ts;
+    }
+  };
+
+  // Get display name for a node
+  const getNodeName = (nodeId: string) => {
+    const node = nodes?.find((n) => n.id === nodeId);
+    return node?.name || nodeId;
+  };
+
+  // Render event based on type
+  const renderEvent = (event: WSEvent, index: number) => {
+    const timestamp = formatTimestamp(event.timestamp);
+
+    if (event.type === 'debug') {
+      const data = event.data as { node_name?: string; topic?: string; payload?: unknown; level?: string } | undefined;
+      const nodeName = data?.node_name || (event.node_id ? getNodeName(event.node_id) : 'unknown');
+      const topic = data?.topic;
+      const payload = data?.payload;
+
+      return (
+        <ExpandableDebugEntry
+          key={index}
+          timestamp={timestamp}
+          nodeName={nodeName}
+          topic={topic}
+          payload={payload}
+        />
+      );
+    }
+
+    if (event.type === 'flow.start') {
+      return (
+        <div key={index} className="py-1.5 px-2 text-xs flex items-center gap-2">
+          <span className="text-muted-foreground">{timestamp}</span>
+          <span className="text-blue-400">Flow started</span>
+        </div>
+      );
+    }
+
+    if (event.type === 'flow.stop') {
+      return (
+        <div key={index} className="py-1.5 px-2 text-xs flex items-center gap-2">
+          <span className="text-muted-foreground">{timestamp}</span>
+          <span className="text-blue-400">Flow stopped</span>
+        </div>
+      );
+    }
+
+    if (event.type === 'flow.error' || event.type === 'node.error') {
+      const data = event.data as { message?: string; Error?: string } | undefined;
+      const message = data?.message || data?.Error || 'Unknown error';
+      const nodeName = event.node_id ? getNodeName(event.node_id) : undefined;
+
+      return (
+        <div key={index} className="py-1.5 px-2 text-xs bg-destructive/10 border-l-2 border-destructive">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">{timestamp}</span>
+            <AlertCircle className="w-3 h-3 text-destructive" />
+            {nodeName && <span className="text-cyan-400">{nodeName}</span>}
+          </div>
+          <div className="text-destructive mt-0.5">{message}</div>
+        </div>
+      );
+    }
+
+    // For flow lifecycle events
+    const typeColor = event.type === 'flow.start' ? 'text-green-400' : event.type === 'flow.stop' ? 'text-amber-400' : 'text-muted-foreground';
+
+    return (
+      <div key={index} className="py-1 px-2 text-xs flex gap-2 text-muted-foreground">
+        <span>{timestamp}</span>
+        <span className={typeColor}>[{event.type}]</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between p-2 border-b border-border">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {wsStatus === 'connected' ? (
+            <>
+              <Wifi className="w-3 h-3 text-success" />
+              <span>Connected</span>
+            </>
+          ) : wsStatus === 'connecting' ? (
+            <>
+              <Wifi className="w-3 h-3 text-warning animate-pulse" />
+              <span>Connecting...</span>
+            </>
+          ) : (
+            <>
+              <WifiOff className="w-3 h-3 text-muted-foreground" />
+              <span>Disconnected</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant={isPaused ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-6 w-6"
+            onClick={handleTogglePause}
+            title={isPaused ? 'Resume' : 'Pause'}
+          >
+            {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+          </Button>
+          <Button
+            variant={showFilters ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => setShowFilters(!showFilters)}
+            title="Toggle filters"
+          >
+            <Settings className="w-3 h-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={onClear}
+            disabled={events.length === 0}
+            title="Clear"
+          >
+            <ClearIcon className="w-3 h-3" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      {showFilters && (
+        <div className="p-2 border-b border-border space-y-2 text-xs">
+          <div>
+            <div className="text-muted-foreground mb-1">Event Types:</div>
+            <div className="flex flex-wrap gap-1">
+              {ALL_EVENT_TYPES.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => toggleType(type)}
+                  className={cn(
+                    'px-1.5 py-0.5 rounded text-[10px]',
+                    visibleTypes.has(type)
+                      ? 'bg-primary/20 text-primary'
+                      : 'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+          {nodeIds.length > 0 && (
+            <div>
+              <div className="text-muted-foreground mb-1">Node:</div>
+              <select
+                value={selectedNode}
+                onChange={(e) => setSelectedNode(e.target.value)}
+                className="w-full bg-muted border border-border rounded px-2 py-1 text-xs"
+              >
+                <option value="all">All nodes</option>
+                {nodeIds.map((id) => (
+                  <option key={id} value={id}>
+                    {getNodeName(id)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Events */}
+      <div ref={scrollRef} className="flex-1 overflow-auto font-mono">
+        {filteredEvents.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground text-xs">
+            {events.length === 0 ? 'No events yet' : 'No matching events'}
+          </div>
+        ) : (
+          <div>{filteredEvents.map((event, i) => renderEvent(event, i))}</div>
+        )}
+      </div>
     </div>
   );
 }

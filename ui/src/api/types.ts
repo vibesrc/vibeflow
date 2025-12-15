@@ -76,8 +76,8 @@ export interface NodeDefinition {
 export interface Wire {
   from: string;
   to: string;
-  output?: string;
-  input?: string;
+  output: string;
+  input: string;
 }
 
 // API request types
