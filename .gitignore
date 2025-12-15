@@ -44,3 +44,4 @@ data/
 .sqlite
 # Vite cache
 .vite/
+bin/

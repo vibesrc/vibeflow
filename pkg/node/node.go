@@ -25,6 +25,18 @@ type PortInfo struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ShowWhen defines conditions for when a config field should be visible.
+// Multiple conditions are ANDed together.
+type ShowWhen struct {
+	Field    string `json:"field"`              // Name of the field to check
+	Eq       any    `json:"eq,omitempty"`       // Show when field equals this value
+	Ne       any    `json:"ne,omitempty"`       // Show when field does not equal this value
+	In       []any  `json:"in,omitempty"`       // Show when field value is in this list
+	NotIn    []any  `json:"notIn,omitempty"`    // Show when field value is not in this list
+	Present  bool   `json:"present,omitempty"`  // Show when field has a non-empty value
+	Absent   bool   `json:"absent,omitempty"`   // Show when field is empty/unset
+}
+
 // ConfigSpec describes a configuration option.
 type ConfigSpec struct {
 	Name        string       `json:"name"`
@@ -37,6 +49,8 @@ type ConfigSpec struct {
 	// Code editor support
 	Format   string `json:"format,omitempty"`   // "code" or "template" for code editor fields
 	Language string `json:"language,omitempty"` // e.g., "javascript", "json", "yaml", "template"
+	// Conditional visibility
+	ShowWhen *ShowWhen `json:"showWhen,omitempty"` // Conditions for when this field is visible
 }
 
 // Output represents a handle to an output port.

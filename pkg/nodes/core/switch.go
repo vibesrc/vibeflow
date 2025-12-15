@@ -7,7 +7,8 @@ import (
 
 	"github.com/bherbruck/vibeflow/pkg/message"
 	"github.com/bherbruck/vibeflow/pkg/node"
-	"github.com/dop251/goja"
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 )
 
 func init() {
@@ -26,8 +27,8 @@ func init() {
 				Required:    true,
 				Description: "Routing rules",
 				Items: []node.ConfigSpec{
-					{Name: "condition", Type: "string", Required: true, Description: "JavaScript expression (e.g., value > 50)"},
-					{Name: "output", Type: "string", Required: true, Description: "Output port name (e.g., out0, out1)"},
+					{Name: "condition", Type: "string", Required: true, Description: "Expression (e.g., value > 50)", Format: "expression"},
+					{Name: "output", Type: "string", Required: true, Description: "Output port name (e.g., out0, out1)", Format: "expression"},
 				},
 			},
 			{Name: "check_all", Type: "bool", Default: false, Description: "Check all rules vs stop at first match"},
@@ -47,9 +48,9 @@ type SwitchNode struct {
 }
 
 type switchRule struct {
-	condition string // JavaScript expression
+	condition string // Expression
 	output    node.Output
-	compiled  *goja.Program
+	compiled  *vm.Program
 }
 
 func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
@@ -90,8 +91,8 @@ func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inp
 			outputName = fmt.Sprintf("out%d", i)
 		}
 
-		// Compile the condition
-		program, err := goja.Compile(fmt.Sprintf("%s_rule_%d", n.id, i), condition, false)
+		// Compile the condition with expr
+		program, err := expr.Compile(condition, expr.AsBool())
 		if err != nil {
 			return fmt.Errorf("switch node %s: rule %d compile error: %w", n.id, i, err)
 		}
@@ -119,23 +120,25 @@ func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, inputPor
 	// Get the property value to evaluate
 	value := n.getProperty(msg)
 
-	matched := false
-	for _, rule := range n.rules {
-		vm := goja.New()
-		vm.Set("value", value)
-		vm.Set("msg", map[string]any{
+	// Build environment for expression evaluation
+	env := map[string]any{
+		"value": value,
+		"msg": map[string]any{
 			"id":       msg.ID,
 			"payload":  msg.Payload,
 			"metadata": msg.Metadata,
 			"context":  msg.Context,
-		})
+		},
+	}
 
-		result, err := vm.RunProgram(rule.compiled)
+	matched := false
+	for _, rule := range n.rules {
+		result, err := expr.Run(rule.compiled, env)
 		if err != nil {
 			continue // Skip rules that error
 		}
 
-		if result.ToBoolean() {
+		if pass, ok := result.(bool); ok && pass {
 			matched = true
 			if rule.output != nil {
 				rule.output.Send(msg.Clone())

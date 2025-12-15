@@ -6,19 +6,20 @@ import (
 
 	"github.com/bherbruck/vibeflow/pkg/message"
 	"github.com/bherbruck/vibeflow/pkg/node"
-	"github.com/dop251/goja"
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 )
 
 func init() {
 	node.RegisterWithInfo("core.filter", func() node.Node { return &FilterNode{} }, node.TypeInfo{
 		Type:        "core.filter",
 		Name:        "Filter",
-		Description: "Filters messages based on a JavaScript condition",
+		Description: "Filters messages based on a condition",
 		Category:    "core",
 		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to filter"}},
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Passed messages"}},
 		Config: []node.ConfigSpec{
-			{Name: "condition", Type: "string", Default: "true", Description: "JavaScript expression that returns boolean"},
+			{Name: "condition", Type: "string", Default: "true", Description: "Expression that returns boolean (e.g., payload > 50)", Format: "expression"},
 			{Name: "pass_empty", Type: "bool", Default: false, Description: "Pass messages with empty/nil payload"},
 		},
 	})
@@ -27,8 +28,8 @@ func init() {
 // FilterNode filters messages based on a condition.
 type FilterNode struct {
 	id        string
-	condition string // JavaScript expression that returns boolean
-	compiled  *goja.Program
+	condition string // Expression that returns boolean
+	compiled  *vm.Program
 	passEmpty bool // Pass messages with empty/nil payload
 	output    node.Output
 }
@@ -38,8 +39,8 @@ func (n *FilterNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inp
 	n.condition = cfg.GetString("condition", "true")
 	n.passEmpty = cfg.GetBool("pass_empty", false)
 
-	// Compile the condition
-	program, err := goja.Compile(n.id, n.condition, false)
+	// Compile the condition with expr
+	program, err := expr.Compile(n.condition, expr.AsBool())
 	if err != nil {
 		return fmt.Errorf("filter node %s: compile error: %w", n.id, err)
 	}
@@ -69,27 +70,26 @@ func (n *FilterNode) Process(ctx context.Context, msg *message.Message, inputPor
 		return nil
 	}
 
-	// Create VM and set variables
-	vm := goja.New()
-	vm.Set("msg", map[string]any{
-		"id":       msg.ID,
-		"payload":  msg.Payload,
-		"metadata": msg.Metadata,
-		"context":  msg.Context,
-	})
+	// Build environment for expression evaluation
+	env := map[string]any{
+		"msg": map[string]any{
+			"id":       msg.ID,
+			"payload":  msg.Payload,
+			"metadata": msg.Metadata,
+			"context":  msg.Context,
+		},
+		"payload": msg.Payload,
+	}
 
-	// Also set payload directly for convenience
-	vm.Set("payload", msg.Payload)
-
-	// Run the condition
-	result, err := vm.RunProgram(n.compiled)
+	// Run the compiled expression
+	result, err := expr.Run(n.compiled, env)
 	if err != nil {
-		// Log error but don't fail - filter drops message on error
+		// Drop message on error
 		return nil
 	}
 
 	// Pass message if condition is true
-	if result.ToBoolean() {
+	if pass, ok := result.(bool); ok && pass {
 		n.output.Send(msg)
 	}
 

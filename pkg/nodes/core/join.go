@@ -22,11 +22,12 @@ func init() {
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Joined message"}},
 		Config: []node.ConfigSpec{
 			{Name: "mode", Type: "string", Default: "auto", Description: "Join mode", Options: []any{"auto", "count", "timeout"}},
-			{Name: "count", Type: "int", Default: 0, Description: "Number of messages to join"},
+			{Name: "count", Type: "int", Default: 0, Description: "Number of messages to join", ShowWhen: &node.ShowWhen{Field: "mode", Eq: "count"}},
 			{Name: "timeout_ms", Type: "int", Default: 5000, Description: "Timeout for collecting messages"},
 			{Name: "join_as", Type: "string", Default: "array", Description: "Output format", Options: []any{"array", "string", "object"}},
-			{Name: "delimiter", Type: "string", Default: "\n", Description: "Delimiter for string joining"},
-			{Name: "key", Type: "string", Description: "Property to use as key for object mode"},
+			{Name: "delimiter", Type: "string", Default: "\n", Description: "Delimiter for string joining", ShowWhen: &node.ShowWhen{Field: "join_as", Eq: "string"}},
+			{Name: "key", Type: "string", Description: "Property to use as key", Format: "expression", ShowWhen: &node.ShowWhen{Field: "join_as", Eq: "object"}},
+			{Name: "value", Type: "string", Description: "Property to use as value (empty = whole payload)", Format: "expression", ShowWhen: &node.ShowWhen{Field: "join_as", Eq: "object"}},
 		},
 		HasStart: true,
 	})
@@ -41,6 +42,7 @@ type JoinNode struct {
 	joinAs    string // "array", "string", "object"
 	delimiter string // For string joining
 	key       string // Property to use as key for object mode
+	value     string // Property to use as value for object mode (empty = whole payload)
 
 	output  node.Output
 	mu      sync.Mutex
@@ -63,6 +65,7 @@ func (n *JoinNode) Init(ctx context.Context, cfg *node.Config, inputs node.Input
 	n.joinAs = cfg.GetString("join_as", "array")
 	n.delimiter = cfg.GetString("delimiter", "\n")
 	n.key = cfg.GetString("key", "")
+	n.value = cfg.GetString("value", "")
 	n.groups = make(map[string]*joinGroup)
 	n.stopCh = make(chan struct{})
 
@@ -174,7 +177,7 @@ func (n *JoinNode) getExpected(msg *message.Message) int {
 	return n.count
 }
 
-func (n *JoinNode) emitGroup(groupID string, group *joinGroup) {
+func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
 	if len(group.messages) == 0 || n.output == nil {
 		return
 	}
@@ -219,7 +222,14 @@ func (n *JoinNode) emitGroup(groupID string, group *joinGroup) {
 			if key == "" {
 				key = fmt.Sprintf("item_%s", m.ID[:8])
 			}
-			obj[key] = m.Payload
+			// Get value - either specific property or whole payload
+			var val any = m.Payload
+			if n.value != "" {
+				if p, ok := m.Payload.(map[string]any); ok {
+					val = p[n.value]
+				}
+			}
+			obj[key] = val
 		}
 		out.Payload = obj
 	}

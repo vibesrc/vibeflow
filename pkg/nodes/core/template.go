@@ -19,7 +19,7 @@ func init() {
 		Inputs:      []node.PortInfo{{Name: "default", Description: "Message to template"}},
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Templated message"}},
 		Config: []node.ConfigSpec{
-			{Name: "template", Type: "string", Required: true, Description: "Go template string"},
+			{Name: "template", Type: "string", Required: true, Description: "Go template string", Format: "template"},
 			{Name: "output", Type: "string", Default: "payload", Description: "Output property path"},
 		},
 	})

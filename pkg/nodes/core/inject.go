@@ -19,9 +19,9 @@ func init() {
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Injected message"}},
 		Config: []node.ConfigSpec{
 			{Name: "payload", Type: "object", Description: "Payload to inject"},
-			{Name: "interval_ms", Type: "int", Default: 0, Description: "Interval in milliseconds (0 = no repeat)"},
 			{Name: "on_start", Type: "bool", Default: true, Description: "Inject on flow start"},
 			{Name: "repeat", Type: "bool", Default: true, Description: "Repeat at interval"},
+			{Name: "interval_ms", Type: "int", Default: 1000, Description: "Interval in milliseconds", ShowWhen: &node.ShowWhen{Field: "repeat", Eq: true}},
 		},
 		HasStart: true,
 	})

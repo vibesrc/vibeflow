@@ -335,15 +335,16 @@ type portInfo struct {
 }
 
 type configSpec struct {
-	Name        string       `json:"name"`
-	Type        string       `json:"type"`
-	Required    bool         `json:"required,omitempty"`
-	Default     any          `json:"default,omitempty"`
-	Description string       `json:"description,omitempty"`
-	Options     []any        `json:"options,omitempty"`
-	Items       []configSpec `json:"items,omitempty"`
-	Format      string       `json:"format,omitempty"`
-	Language    string       `json:"language,omitempty"`
+	Name        string          `json:"name"`
+	Type        string          `json:"type"`
+	Required    bool            `json:"required,omitempty"`
+	Default     any             `json:"default,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Options     []any           `json:"options,omitempty"`
+	Items       []configSpec    `json:"items,omitempty"`
+	Format      string          `json:"format,omitempty"`
+	Language    string          `json:"language,omitempty"`
+	ShowWhen    *node.ShowWhen  `json:"showWhen,omitempty"`
 }
 
 type nodeTypeInfo struct {
@@ -368,6 +369,7 @@ func convertConfigSpec(c node.ConfigSpec) configSpec {
 		Options:     c.Options,
 		Format:      c.Format,
 		Language:    c.Language,
+		ShowWhen:    c.ShowWhen,
 	}
 	if len(c.Items) > 0 {
 		spec.Items = make([]configSpec, len(c.Items))

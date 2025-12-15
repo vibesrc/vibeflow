@@ -19,7 +19,7 @@ func init() {
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Split messages"}},
 		Config: []node.ConfigSpec{
 			{Name: "split_on", Type: "string", Default: "array", Description: "Split mode", Options: []any{"array", "string", "object"}},
-			{Name: "delimiter", Type: "string", Default: "\n", Description: "Delimiter for string splitting"},
+			{Name: "delimiter", Type: "string", Default: "\n", Description: "Delimiter for string splitting", Format: "expression", ShowWhen: &node.ShowWhen{Field: "split_on", Eq: "string"}},
 			{Name: "add_parts", Type: "bool", Default: true, Description: "Add split metadata to messages"},
 		},
 	})

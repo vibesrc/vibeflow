@@ -15,6 +15,17 @@ export interface PortInfo {
   description?: string;
 }
 
+// Conditions for when a config field should be visible
+export interface ShowWhen {
+  field: string;        // Name of the field to check
+  eq?: unknown;         // Show when field equals this value
+  ne?: unknown;         // Show when field does not equal this value
+  in?: unknown[];       // Show when field value is in this list
+  notIn?: unknown[];    // Show when field value is not in this list
+  present?: boolean;    // Show when field has a non-empty value
+  absent?: boolean;     // Show when field is empty/unset
+}
+
 export interface ConfigSpec {
   name: string;
   type: 'string' | 'int' | 'bool' | 'float' | 'object' | 'array';
@@ -24,8 +35,10 @@ export interface ConfigSpec {
   options?: unknown[];
   items?: ConfigSpec[];
   // Code editor support
-  format?: 'code' | 'template';
+  format?: 'code' | 'template' | 'expression';
   language?: string; // e.g., 'javascript', 'json', 'yaml', 'template'
+  // Conditional visibility
+  showWhen?: ShowWhen;
 }
 
 export interface NodeType {

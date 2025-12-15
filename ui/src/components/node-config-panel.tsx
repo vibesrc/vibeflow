@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDebouncedCallback } from '@/hooks/use-debounce';
-import type { NodeDefinition, NodeType, ConfigSpec } from '@/api';
+import type { NodeDefinition, NodeType, ConfigSpec, ShowWhen } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,8 +15,58 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { CodeEditor, CodeInput } from '@/components/code-editor';
+import { CodeEditor, ExpressionInput, TemplateInput } from '@/components/code-editor';
 import { Plus, X, GripVertical } from 'lucide-react';
+
+// Helper to check if a value is "empty" (null, undefined, empty string, empty array)
+function isEmpty(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string' && value === '') return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
+}
+
+// Evaluate showWhen conditions against current config values
+function evaluateShowWhen(
+  showWhen: ShowWhen | undefined,
+  config: Record<string, unknown>
+): boolean {
+  if (!showWhen) return true; // No condition = always show
+
+  const fieldValue = config[showWhen.field];
+
+  // Check 'eq' condition
+  if (showWhen.eq !== undefined) {
+    if (fieldValue !== showWhen.eq) return false;
+  }
+
+  // Check 'ne' condition
+  if (showWhen.ne !== undefined) {
+    if (fieldValue === showWhen.ne) return false;
+  }
+
+  // Check 'in' condition
+  if (showWhen.in !== undefined && showWhen.in.length > 0) {
+    if (!showWhen.in.includes(fieldValue)) return false;
+  }
+
+  // Check 'notIn' condition
+  if (showWhen.notIn !== undefined && showWhen.notIn.length > 0) {
+    if (showWhen.notIn.includes(fieldValue)) return false;
+  }
+
+  // Check 'present' condition
+  if (showWhen.present) {
+    if (isEmpty(fieldValue)) return false;
+  }
+
+  // Check 'absent' condition
+  if (showWhen.absent) {
+    if (!isEmpty(fieldValue)) return false;
+  }
+
+  return true;
+}
 
 interface NodeConfigPanelProps {
   node: NodeDefinition;
@@ -138,21 +188,23 @@ export function NodeConfigPanel({ node, nodeType, onUpdate }: NodeConfigPanelPro
             Configuration
           </h3>
           <div className="space-y-3">
-            {/* Schema-defined fields - always show all */}
-            {configSchema.map((spec) => {
-              // Use value from localConfig, or fall back to spec default, or type default
-              const value = spec.name in localConfig
-                ? localConfig[spec.name]
-                : (spec.default ?? getDefaultForType(spec.type));
-              return (
-                <SchemaConfigField
-                  key={spec.name}
-                  spec={spec}
-                  value={value}
-                  onChange={(v) => handleConfigChange(spec.name, v)}
-                />
-              );
-            })}
+            {/* Schema-defined fields - filtered by showWhen conditions */}
+            {configSchema
+              .filter((spec) => evaluateShowWhen(spec.showWhen, localConfig))
+              .map((spec) => {
+                // Use value from localConfig, or fall back to spec default, or type default
+                const value = spec.name in localConfig
+                  ? localConfig[spec.name]
+                  : (spec.default ?? getDefaultForType(spec.type));
+                return (
+                  <SchemaConfigField
+                    key={spec.name}
+                    spec={spec}
+                    value={value}
+                    onChange={(v) => handleConfigChange(spec.name, v)}
+                  />
+                );
+              })}
 
             {/* Custom fields (not in schema) */}
             {customFields.map((key) => (
@@ -264,14 +316,16 @@ function ArrayItemsEditor({
             </Button>
           </div>
           <div className="space-y-2">
-            {itemsSchema.map((fieldSpec) => (
-              <ItemField
-                key={fieldSpec.name}
-                spec={fieldSpec}
-                value={item[fieldSpec.name]}
-                onChange={(v) => updateItem(index, fieldSpec.name, v)}
-              />
-            ))}
+            {itemsSchema
+              .filter((fieldSpec) => evaluateShowWhen(fieldSpec.showWhen, item))
+              .map((fieldSpec) => (
+                <ItemField
+                  key={fieldSpec.name}
+                  spec={fieldSpec}
+                  value={item[fieldSpec.name]}
+                  onChange={(v) => updateItem(index, fieldSpec.name, v)}
+                />
+              ))}
           </div>
         </div>
       ))}
@@ -343,6 +397,11 @@ function ItemField({
           }}
           className="h-7 text-xs"
           placeholder={spec.default !== undefined ? `Default: ${spec.default}` : undefined}
+        />
+      ) : spec.format === 'expression' ? (
+        <ExpressionInput
+          value={String(value ?? '')}
+          onChange={(v) => onChange(v)}
         />
       ) : (
         <Input
@@ -440,11 +499,15 @@ function SchemaConfigField({
           height={150}
           label={spec.name}
         />
-      ) : spec.format === 'template' ? (
-        <CodeInput
+      ) : spec.format === 'expression' ? (
+        <ExpressionInput
           value={String(value ?? '')}
           onChange={(v) => onChange(v)}
-          language={spec.language || 'plaintext'}
+        />
+      ) : spec.format === 'template' ? (
+        <TemplateInput
+          value={String(value ?? '')}
+          onChange={(v) => onChange(v)}
         />
       ) : (
         <Input

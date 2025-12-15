@@ -25,9 +25,9 @@ func init() {
 				Description: "Change rules",
 				Items: []node.ConfigSpec{
 					{Name: "action", Type: "string", Required: true, Description: "Action type", Options: []any{"set", "delete", "move", "copy"}},
-					{Name: "property", Type: "string", Required: true, Description: "Target property (e.g., payload.data)"},
-					{Name: "value", Type: "string", Description: "Value to set (for 'set' action)"},
-					{Name: "from", Type: "string", Description: "Source property (for 'move' and 'copy' actions)"},
+					{Name: "property", Type: "string", Required: true, Description: "Target property (e.g., payload.data)", Format: "expression"},
+					{Name: "value", Type: "string", Description: "Value to set", Format: "expression", ShowWhen: &node.ShowWhen{Field: "action", Eq: "set"}},
+					{Name: "from", Type: "string", Description: "Source property", Format: "expression", ShowWhen: &node.ShowWhen{Field: "action", In: []any{"move", "copy"}}},
 				},
 			},
 		},

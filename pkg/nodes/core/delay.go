@@ -21,9 +21,9 @@ func init() {
 		Config: []node.ConfigSpec{
 			{Name: "delay_ms", Type: "int", Default: 1000, Description: "Delay in milliseconds"},
 			{Name: "randomize", Type: "bool", Default: false, Description: "Add random variation"},
-			{Name: "max_delay_ms", Type: "int", Description: "Max delay when randomizing"},
+			{Name: "max_delay_ms", Type: "int", Description: "Max delay when randomizing", ShowWhen: &node.ShowWhen{Field: "randomize", Eq: true}},
 			{Name: "rate_limit", Type: "int", Default: 0, Description: "Messages per second (0 = disabled)"},
-			{Name: "drop", Type: "bool", Default: false, Description: "Drop messages if rate limited"},
+			{Name: "drop", Type: "bool", Default: false, Description: "Drop messages if rate limited", ShowWhen: &node.ShowWhen{Field: "rate_limit", Ne: 0}},
 		},
 	})
 }
