@@ -180,49 +180,44 @@ interface DebugPanelProps {
   events: WSEvent[];
   wsStatus: ConnectionStatus;
   onClear: () => void;
+  isPaused: boolean;
+  onPause: () => void;
+  onResume: () => void;
   nodes?: NodeDefinition[];
 }
 
-export function DebugPanel({ events, wsStatus, onClear, nodes }: DebugPanelProps) {
+export function DebugPanel({ events, wsStatus, onClear, isPaused, onPause, onResume, nodes }: DebugPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(DEFAULT_VISIBLE_TYPES);
   const [selectedNode, setSelectedNode] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [pausedEvents, setPausedEvents] = useState<WSEvent[] | null>(null);
 
-  // Use paused snapshot or live events
-  const displayEvents = pausedEvents ?? events;
-
-  // Get unique node IDs from display events
+  // Get unique node IDs from events
   const nodeIds = useMemo(() => {
     const ids = new Set<string>();
-    displayEvents.forEach((e) => {
+    events.forEach((e) => {
       if (e.node_id) ids.add(e.node_id);
     });
     return Array.from(ids);
-  }, [displayEvents]);
+  }, [events]);
 
   // Filter events based on visible types and selected node
   const filteredEvents = useMemo(() => {
-    return displayEvents.filter((e) => {
+    return events.filter((e) => {
       if (!visibleTypes.has(e.type)) return false;
       if (selectedNode !== 'all' && e.node_id !== selectedNode) return false;
       return true;
     });
-  }, [displayEvents, visibleTypes, selectedNode]);
+  }, [events, visibleTypes, selectedNode]);
 
-  // Handle pause/resume
+  // Handle pause/resume - now truly stops event collection
   const handleTogglePause = useCallback(() => {
     if (isPaused) {
-      // Resume: clear paused snapshot
-      setPausedEvents(null);
+      onResume();
     } else {
-      // Pause: capture current events
-      setPausedEvents([...events]);
+      onPause();
     }
-    setIsPaused(!isPaused);
-  }, [isPaused, events]);
+  }, [isPaused, onPause, onResume]);
 
   // Auto-scroll to bottom when new events arrive (unless paused)
   useEffect(() => {
@@ -316,6 +311,11 @@ export function DebugPanel({ events, wsStatus, onClear, nodes }: DebugPanelProps
           message={message}
         />
       );
+    }
+
+    // Variable events are shown in Variables panel, skip in debug
+    if (event.type === 'variable') {
+      return null;
     }
 
     // For flow lifecycle events

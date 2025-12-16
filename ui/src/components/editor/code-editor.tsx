@@ -76,7 +76,7 @@ export function CodeEditor({
         noSyntaxValidation: false,
       });
 
-      // Add msg type definition for autocomplete
+      // Add type definitions for autocomplete
       monaco.languages.typescript.javascriptDefaults.addExtraLib(
         `
         interface Message {
@@ -86,6 +86,60 @@ export function CodeEditor({
           context: Record<string, any>;
         }
         declare const msg: Message;
+
+        /** Shorthand for msg.payload */
+        declare const payload: any;
+
+        /**
+         * Context accessor for flow-level state.
+         * Shared across all nodes in this flow.
+         */
+        interface FlowContext {
+          /** Get a value from flow context by key */
+          get(key: string): any;
+          /** Set a value in flow context */
+          set(key: string, value: any): void;
+          /** Delete a value from flow context */
+          delete(key: string): void;
+          /** List all keys in flow context */
+          keys(): string[];
+        }
+        declare const flow: FlowContext;
+
+        /**
+         * Context accessor for node-level state.
+         * State specific to this node instance.
+         */
+        interface NodeContext {
+          /** Get a value from this node's context by key */
+          get(key: string): any;
+          /** Set a value in this node's context */
+          set(key: string, value: any): void;
+          /** Delete a value from this node's context */
+          delete(key: string): void;
+          /** List all keys in this node's context */
+          keys(): string[];
+        }
+        declare const node: NodeContext;
+
+        /**
+         * Context accessor for global state.
+         * Shared across all flows.
+         */
+        interface GlobalContext {
+          /** Get a value from global context by key */
+          get(key: string): any;
+          /** Set a value in global context */
+          set(key: string, value: any): void;
+          /** Delete a value from global context */
+          delete(key: string): void;
+          /** List all keys in global context */
+          keys(): string[];
+        }
+        declare const global: GlobalContext;
+
+        /** Access to environment variables */
+        declare const env: Record<string, string>;
         `,
         'vibeflow-types.d.ts'
       );

@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,11 +34,16 @@ type WSMessage struct {
 // Returns map[flowID]map[nodeID]errorMessage
 type ErrorSnapshotFunc func() map[string]map[string]string
 
+// VariableSnapshotFunc returns current variables from all running flows.
+// Returns map[flowID]map[key]value where key includes scope prefix.
+type VariableSnapshotFunc func() map[string]map[string]any
+
 // WSHub manages WebSocket connections and broadcasts events.
 type WSHub struct {
-	bus            *events.Bus
-	logger         *slog.Logger
-	errorSnapshot  ErrorSnapshotFunc
+	bus              *events.Bus
+	logger           *slog.Logger
+	errorSnapshot    ErrorSnapshotFunc
+	variableSnapshot VariableSnapshotFunc
 
 	// Connected clients
 	clients   map[*wsClient]bool
@@ -49,21 +56,97 @@ type WSHub struct {
 	done chan struct{}
 }
 
+// Subscription represents a client's event subscription.
+type Subscription struct {
+	FlowID string   `json:"flow_id,omitempty"` // Flow to subscribe to (empty = global only)
+	Types  []string `json:"types,omitempty"`   // Event types: "debug", "errors", "variables", "lifecycle"
+}
+
 type wsClient struct {
-	hub     *WSHub
-	conn    *websocket.Conn
-	send    chan []byte
-	pattern string // Subscription pattern from client
+	hub  *WSHub
+	conn *websocket.Conn
+	send chan []byte
+
+	// Subscription state
+	mu           sync.RWMutex
+	subscription *Subscription // nil = not subscribed to anything
+}
+
+// isSubscribed checks if the client wants to receive this event.
+func (c *wsClient) isSubscribed(eventType string, flowID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.subscription == nil {
+		return false // Not subscribed to anything
+	}
+
+	// Check flow match (empty subscription flow = global events only)
+	if c.subscription.FlowID != "" && c.subscription.FlowID != flowID {
+		return false
+	}
+
+	// Check type match
+	if len(c.subscription.Types) == 0 {
+		return true // No type filter = all types
+	}
+
+	// Map event types to subscription categories
+	category := eventTypeToCategory(eventType)
+	for _, t := range c.subscription.Types {
+		if t == category {
+			return true
+		}
+	}
+	return false
+}
+
+// setSubscription updates the client's subscription.
+func (c *wsClient) setSubscription(sub *Subscription) {
+	c.mu.Lock()
+	c.subscription = sub
+	c.mu.Unlock()
+}
+
+// getSubscription returns a copy of the current subscription.
+func (c *wsClient) getSubscription() *Subscription {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.subscription == nil {
+		return nil
+	}
+	// Return a copy
+	return &Subscription{
+		FlowID: c.subscription.FlowID,
+		Types:  append([]string{}, c.subscription.Types...),
+	}
+}
+
+// eventTypeToCategory maps event type strings to subscription categories.
+func eventTypeToCategory(eventType string) string {
+	switch eventType {
+	case "debug":
+		return "debug"
+	case "node.error", "flow.error":
+		return "errors"
+	case "variable":
+		return "variables"
+	case "flow.start", "flow.stop":
+		return "lifecycle"
+	default:
+		return eventType
+	}
 }
 
 // NewWSHub creates a new WebSocket hub.
-func NewWSHub(bus *events.Bus, errorSnapshot ErrorSnapshotFunc) *WSHub {
+func NewWSHub(bus *events.Bus, errorSnapshot ErrorSnapshotFunc, variableSnapshot VariableSnapshotFunc) *WSHub {
 	hub := &WSHub{
-		bus:           bus,
-		logger:        slog.Default(),
-		errorSnapshot: errorSnapshot,
-		clients:       make(map[*wsClient]bool),
-		done:          make(chan struct{}),
+		bus:              bus,
+		logger:           slog.Default(),
+		errorSnapshot:    errorSnapshot,
+		variableSnapshot: variableSnapshot,
+		clients:          make(map[*wsClient]bool),
+		done:             make(chan struct{}),
 	}
 
 	// Subscribe to all events
@@ -105,14 +188,15 @@ func (h *WSHub) run() {
 }
 
 // isDebugPanelEvent returns true for events that should be sent to the debug panel.
-// Only send: debug node output, flow lifecycle (start/stop), and errors.
+// Only send: debug node output, flow lifecycle (start/stop), errors, and variable changes.
 func isDebugPanelEvent(t events.EventType) bool {
 	switch t {
 	case events.EventDebug,
 		events.EventFlowStart,
 		events.EventFlowStop,
 		events.EventFlowError,
-		events.EventNodeError:
+		events.EventNodeError,
+		events.EventVariable:
 		return true
 	default:
 		return false
@@ -125,17 +209,22 @@ func (h *WSHub) broadcast(e events.Event) {
 		return
 	}
 
+	eventType := e.Type.String()
+
+	// Sanitize event data to prevent marshal panics (goja values, etc.)
+	safeData := sanitizeForJSON(e.Data)
+
 	msg := WSMessage{
-		Type:      e.Type.String(),
+		Type:      eventType,
 		Timestamp: e.Timestamp,
 		FlowID:    e.FlowID,
 		NodeID:    e.NodeID,
-		Data:      e.Data,
+		Data:      safeData,
 	}
 
-	data, err := json.Marshal(msg)
+	data, err := safeMarshal(msg)
 	if err != nil {
-		h.logger.Error("failed to marshal event", "error", err)
+		h.logger.Error("failed to marshal event", "error", err, "type", eventType)
 		return
 	}
 
@@ -147,6 +236,11 @@ func (h *WSHub) broadcast(e events.Event) {
 	h.clientsMu.RUnlock()
 
 	for _, client := range clients {
+		// Check if client is subscribed to this event
+		if !client.isSubscribed(eventType, e.FlowID) {
+			continue
+		}
+
 		select {
 		case client.send <- data:
 		default:
@@ -182,10 +276,10 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &wsClient{
-		hub:     h,
-		conn:    conn,
-		send:    make(chan []byte, 256),
-		pattern: "*", // Default to all events
+		hub:  h,
+		conn: conn,
+		send: make(chan []byte, 256),
+		// subscription starts as nil - client must subscribe to receive events
 	}
 
 	h.addClient(client)
@@ -194,18 +288,40 @@ func (h *WSHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go client.writePump()
 	go client.readPump()
 
-	// Send current error snapshot to new client
-	h.sendErrorSnapshot(client)
+	// Don't send snapshots automatically - wait for client to subscribe
 }
 
 // sendErrorSnapshot sends current node errors to a client as node.error events.
+// Only sends errors for flows the client is subscribed to.
 func (h *WSHub) sendErrorSnapshot(client *wsClient) {
 	if h.errorSnapshot == nil {
 		return
 	}
 
+	sub := client.getSubscription()
+	if sub == nil {
+		return
+	}
+
+	// Check if client wants errors
+	wantsErrors := len(sub.Types) == 0 // no filter = all types
+	for _, t := range sub.Types {
+		if t == "errors" {
+			wantsErrors = true
+			break
+		}
+	}
+	if !wantsErrors {
+		return
+	}
+
 	allErrors := h.errorSnapshot()
 	for flowID, nodeErrors := range allErrors {
+		// Only send for subscribed flow
+		if sub.FlowID != "" && sub.FlowID != flowID {
+			continue
+		}
+
 		for nodeID, message := range nodeErrors {
 			msg := WSMessage{
 				Type:      "node.error",
@@ -225,6 +341,129 @@ func (h *WSHub) sendErrorSnapshot(client *wsClient) {
 			}
 		}
 	}
+}
+
+// sendVariableSnapshot sends current variables to a client as variable events.
+// Only sends variables for flows the client is subscribed to.
+func (h *WSHub) sendVariableSnapshot(client *wsClient) {
+	if h.variableSnapshot == nil {
+		return
+	}
+
+	sub := client.getSubscription()
+	if sub == nil {
+		return
+	}
+
+	// Check if client wants variables
+	wantsVars := len(sub.Types) == 0 // no filter = all types
+	for _, t := range sub.Types {
+		if t == "variables" {
+			wantsVars = true
+			break
+		}
+	}
+	if !wantsVars {
+		return
+	}
+
+	allVars := h.variableSnapshot()
+	for flowID, vars := range allVars {
+		// Only send for subscribed flow
+		if sub.FlowID != "" && sub.FlowID != flowID {
+			continue
+		}
+
+		for key, value := range vars {
+			// Parse key to extract scope, nodeID, and variable name
+			// Key formats: "global:name", "flow:flowID:name", "node:flowID:nodeID:name"
+			scope, nodeID, varKey := parseVariableKey(key)
+
+			// Sanitize value to prevent panics
+			safeValue := sanitizeForJSON(value)
+
+			msg := WSMessage{
+				Type:      "variable",
+				Timestamp: time.Now(),
+				FlowID:    flowID,
+				NodeID:    nodeID,
+				Data: map[string]any{
+					"scope": scope,
+					"key":   varKey,
+					"value": safeValue,
+				},
+			}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			select {
+			case client.send <- data:
+			default:
+				// Buffer full, skip
+			}
+		}
+	}
+}
+
+// parseVariableKey extracts scope, nodeID, and key name from a prefixed key.
+func parseVariableKey(key string) (scope, nodeID, varKey string) {
+	parts := strings.SplitN(key, ":", 4)
+	switch parts[0] {
+	case "global":
+		scope = "global"
+		if len(parts) >= 2 {
+			varKey = parts[1]
+		}
+	case "flow":
+		scope = "flow"
+		if len(parts) >= 3 {
+			varKey = parts[2]
+		}
+	case "node":
+		scope = "node"
+		if len(parts) >= 4 {
+			nodeID = parts[2]
+			varKey = parts[3]
+		}
+	}
+	return
+}
+
+// sanitizeForJSON converts a value to a JSON-serializable form.
+func sanitizeForJSON(value any) (result any) {
+	if value == nil {
+		return nil
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			result = fmt.Sprintf("%v", value)
+		}
+	}()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+
+	return result
+}
+
+// safeMarshal wraps json.Marshal with panic recovery.
+func safeMarshal(v any) (data []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("marshal panic: %v", r)
+			data = nil
+		}
+	}()
+
+	return json.Marshal(v)
 }
 
 // ClientCount returns the number of connected clients.
@@ -263,13 +502,32 @@ func (c *wsClient) readPump() {
 			break
 		}
 
-		// Handle incoming messages (e.g., subscription changes)
+		// Handle incoming messages
 		var req struct {
-			Subscribe string `json:"subscribe"`
+			Subscribe   *Subscription `json:"subscribe,omitempty"`
+			Unsubscribe bool          `json:"unsubscribe,omitempty"`
 		}
-		if err := json.Unmarshal(message, &req); err == nil && req.Subscribe != "" {
-			c.pattern = req.Subscribe
-			c.hub.logger.Debug("client subscription changed", "pattern", c.pattern)
+		if err := json.Unmarshal(message, &req); err != nil {
+			c.hub.logger.Debug("failed to parse websocket message", "error", err)
+			continue
+		}
+
+		if req.Unsubscribe {
+			// Unsubscribe from all events
+			c.setSubscription(nil)
+			c.hub.logger.Debug("client unsubscribed", "remote", c.conn.RemoteAddr())
+		} else if req.Subscribe != nil {
+			// Update subscription and send snapshots
+			c.setSubscription(req.Subscribe)
+			c.hub.logger.Debug("client subscribed",
+				"remote", c.conn.RemoteAddr(),
+				"flow_id", req.Subscribe.FlowID,
+				"types", req.Subscribe.Types,
+			)
+
+			// Send current state snapshots for the subscribed flow/types
+			c.hub.sendErrorSnapshot(c)
+			c.hub.sendVariableSnapshot(c)
 		}
 	}
 }

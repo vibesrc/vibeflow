@@ -321,3 +321,19 @@ func (e *Engine) GetAllNodeErrors() map[string]map[string]string {
 	}
 	return result
 }
+
+// GetAllVariables returns current variables from all running flows.
+// Returns map[flowID]map[key]value where key includes scope prefix.
+func (e *Engine) GetAllVariables() map[string]map[string]any {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	result := make(map[string]map[string]any)
+	for id, instance := range e.runtimes {
+		vars := instance.runtime.Variables()
+		if len(vars) > 0 {
+			result[id] = vars
+		}
+	}
+	return result
+}

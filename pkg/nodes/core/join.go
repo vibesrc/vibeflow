@@ -98,12 +98,12 @@ func (n *JoinNode) timeoutChecker(ctx context.Context) {
 		case <-n.stopCh:
 			return
 		case <-ticker.C:
-			n.checkTimeouts()
+			n.checkTimeouts(ctx)
 		}
 	}
 }
 
-func (n *JoinNode) checkTimeouts() {
+func (n *JoinNode) checkTimeouts(ctx context.Context) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -112,7 +112,7 @@ func (n *JoinNode) checkTimeouts() {
 
 	for groupID, group := range n.groups {
 		if now.Sub(group.created) > timeout && len(group.messages) > 0 {
-			n.emitGroup(groupID, group)
+			n.emitGroup(ctx, groupID, group)
 			delete(n.groups, groupID)
 		}
 	}
@@ -152,7 +152,7 @@ func (n *JoinNode) Process(ctx context.Context, msg *message.Message, inputPort 
 	}
 
 	if complete {
-		n.emitGroup(groupID, group)
+		n.emitGroup(ctx, groupID, group)
 		delete(n.groups, groupID)
 	}
 
@@ -177,7 +177,7 @@ func (n *JoinNode) getExpected(msg *message.Message) int {
 	return n.count
 }
 
-func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
+func (n *JoinNode) emitGroup(ctx context.Context, _ string, group *joinGroup) {
 	if len(group.messages) == 0 || n.output == nil {
 		return
 	}
@@ -212,8 +212,8 @@ func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
 		for _, m := range sortedMsgs {
 			key := m.GetMeta("split_key")
 			if key == "" && n.key != "" {
-				// Extract key using expr
-				if k := node.EvalExprString(n.key, m); k != "" {
+				// Extract key using expr (with context for flow/node/global access)
+				if k := node.EvalExprStringWithContext(ctx, n.key, m); k != "" {
 					key = k
 				}
 			}
@@ -223,7 +223,7 @@ func (n *JoinNode) emitGroup(_ string, group *joinGroup) {
 			// Get value - either specific property or whole payload
 			var val any = m.Payload
 			if n.value != "" {
-				if v, err := node.EvalExpr(n.value, m); err == nil && v != nil {
+				if v, err := node.EvalExprWithContext(ctx, n.value, m); err == nil && v != nil {
 					val = v
 				}
 			}

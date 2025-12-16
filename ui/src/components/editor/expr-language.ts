@@ -30,8 +30,8 @@ export function registerExprLanguage(monaco: Monaco) {
         [/[+\-*/%?:]/, 'operator'],
         // Built-in functions
         [/\b(len|all|any|one|none|map|filter|count|sum|min|max|first|last|take|keys|values|sort|reverse|uniq|flatten|toJSON|fromJSON|trim|upper|lower|split|join|replace|now|duration|date)\b/, 'function'],
-        // Global objects (msg, flow, env)
-        [/\b(msg|flow|env)\b/, { token: 'variable.predefined', next: '@property' }],
+        // Global objects (msg, flow, node, global, env)
+        [/\b(msg|flow|node|global|env)\b/, { token: 'variable.predefined', next: '@property' }],
         // Payload shorthand
         [/\b(payload|value)\b/, { token: 'variable.predefined', next: '@property' }],
         // Lambda placeholder
@@ -89,12 +89,34 @@ export function registerExprLanguage(monaco: Monaco) {
         // Shorthand
         { label: 'payload', kind: 5, insertText: 'payload', detail: 'Message payload (shorthand)', range },
         { label: 'value', kind: 5, insertText: 'value', detail: 'Extracted property value (switch)', range },
-        // Flow context
-        { label: 'flow', kind: 5, insertText: 'flow', detail: 'Flow-level context', range },
         // Environment
         { label: 'env', kind: 5, insertText: 'env', detail: 'Environment variables', range },
         // Lambda placeholder
         { label: '#', kind: 5, insertText: '#', detail: 'Current element in lambda', documentation: 'filter(items, # > 10)', range },
+      );
+
+      // Context accessors (flow, node, global)
+      suggestions.push(
+        // Flow context - shared across all nodes in a flow
+        { label: 'flow', kind: 5, insertText: 'flow', detail: 'Flow-level context', documentation: 'Shared state across all nodes in this flow', range },
+        { label: 'flow.get', kind: 1, insertText: 'flow.get("${1:key}")', insertTextRules: 4, detail: 'Get flow variable', documentation: 'Get a value from flow context by key', range },
+        { label: 'flow.set', kind: 1, insertText: 'flow.set("${1:key}", ${2:value})', insertTextRules: 4, detail: 'Set flow variable', documentation: 'Set a value in flow context', range },
+        { label: 'flow.delete', kind: 1, insertText: 'flow.delete("${1:key}")', insertTextRules: 4, detail: 'Delete flow variable', range },
+        { label: 'flow.keys', kind: 1, insertText: 'flow.keys()', insertTextRules: 4, detail: 'List flow variable keys', range },
+
+        // Node context - specific to this node instance
+        { label: 'node', kind: 5, insertText: 'node', detail: 'Node-level context', documentation: 'State specific to this node instance', range },
+        { label: 'node.get', kind: 1, insertText: 'node.get("${1:key}")', insertTextRules: 4, detail: 'Get node variable', documentation: 'Get a value from this node\'s context', range },
+        { label: 'node.set', kind: 1, insertText: 'node.set("${1:key}", ${2:value})', insertTextRules: 4, detail: 'Set node variable', documentation: 'Set a value in this node\'s context', range },
+        { label: 'node.delete', kind: 1, insertText: 'node.delete("${1:key}")', insertTextRules: 4, detail: 'Delete node variable', range },
+        { label: 'node.keys', kind: 1, insertText: 'node.keys()', insertTextRules: 4, detail: 'List node variable keys', range },
+
+        // Global context - shared across all flows
+        { label: 'global', kind: 5, insertText: 'global', detail: 'Global context', documentation: 'Shared state across all flows', range },
+        { label: 'global.get', kind: 1, insertText: 'global.get("${1:key}")', insertTextRules: 4, detail: 'Get global variable', documentation: 'Get a value from global context', range },
+        { label: 'global.set', kind: 1, insertText: 'global.set("${1:key}", ${2:value})', insertTextRules: 4, detail: 'Set global variable', documentation: 'Set a value in global context', range },
+        { label: 'global.delete', kind: 1, insertText: 'global.delete("${1:key}")', insertTextRules: 4, detail: 'Delete global variable', range },
+        { label: 'global.keys', kind: 1, insertText: 'global.keys()', insertTextRules: 4, detail: 'List global variable keys', range },
       );
 
       // Operators

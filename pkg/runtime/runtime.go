@@ -3,9 +3,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	vfcontext "github.com/bherbruck/vibeflow/pkg/context"
 	"github.com/bherbruck/vibeflow/pkg/events"
@@ -184,7 +187,104 @@ func New(registry *node.Registry, opts ...Option) *Runtime {
 		opt(r)
 	}
 
+	// Wire up variable change events if we have an event bus
+	r.wireupVariableEvents()
+
 	return r
+}
+
+// sanitizeForJSON converts a value to a JSON-serializable form.
+// This is needed because goja values from script nodes may not serialize directly.
+// Uses recover() because json.Marshal can panic on certain types.
+func sanitizeForJSON(value any) (result any) {
+	if value == nil {
+		return nil
+	}
+
+	// Recover from panics during marshaling (goja maps can cause this)
+	defer func() {
+		if r := recover(); r != nil {
+			result = fmt.Sprintf("%v", value)
+		}
+	}()
+
+	// Try to marshal and unmarshal to convert to standard Go types
+	data, err := json.Marshal(value)
+	if err != nil {
+		// If marshaling fails, return string representation
+		return fmt.Sprintf("%v", value)
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+
+	return result
+}
+
+// wireupVariableEvents sets up the store to emit events on variable changes.
+func (r *Runtime) wireupVariableEvents() {
+	if r.events == nil {
+		return
+	}
+
+	// Check if store is a MemoryStore (has SetOnChange method)
+	if ms, ok := r.store.(*vfcontext.MemoryStore); ok {
+		ms.SetOnChange(func(changeType vfcontext.ChangeType, key string, value any) {
+			// Parse key to determine scope and extract flow/node IDs
+			// Key formats:
+			//   "global:keyname"
+			//   "flow:flowID:keyname"
+			//   "node:flowID:nodeID:keyname"
+
+			var scope, flowID, nodeID, varKey string
+
+			parts := strings.SplitN(key, ":", 4)
+			switch parts[0] {
+			case "global":
+				scope = "global"
+				if len(parts) >= 2 {
+					varKey = parts[1]
+				}
+			case "flow":
+				scope = "flow"
+				if len(parts) >= 3 {
+					flowID = parts[1]
+					varKey = parts[2]
+				}
+			case "node":
+				scope = "node"
+				if len(parts) >= 4 {
+					flowID = parts[1]
+					nodeID = parts[2]
+					varKey = parts[3]
+				}
+			default:
+				return // Unknown prefix, skip
+			}
+
+			// Don't emit delete events (optional - could include them)
+			if changeType == vfcontext.ChangeDelete {
+				value = nil
+			}
+
+			// Sanitize value to ensure it's JSON-serializable
+			// (goja values from script nodes may not serialize directly)
+			safeValue := sanitizeForJSON(value)
+
+			r.events.Emit(events.Event{
+				Type:      events.EventVariable,
+				Timestamp: time.Now(),
+				FlowID:    flowID,
+				NodeID:    nodeID,
+				Data: events.VariableData{
+					Scope: scope,
+					Key:   varKey,
+					Value: safeValue,
+				},
+			})
+		})
+	}
 }
 
 // SetFlowID sets the flow ID for event correlation.
@@ -504,6 +604,15 @@ func (r *Runtime) NodeErrors() map[string]string {
 		errors[k] = v
 	}
 	return errors
+}
+
+// Variables returns all variables from the store.
+// Returns map[key]value where key includes the scope prefix (global:, flow:, node:).
+func (r *Runtime) Variables() map[string]any {
+	if ms, ok := r.store.(*vfcontext.MemoryStore); ok {
+		return ms.All()
+	}
+	return nil
 }
 
 type emitter struct {

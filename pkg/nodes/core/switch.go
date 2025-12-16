@@ -117,10 +117,10 @@ func (n *SwitchNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inp
 
 func (n *SwitchNode) Process(ctx context.Context, msg *message.Message, inputPort string) error {
 	// Get the property value to evaluate using expr
-	value, _ := node.EvalExpr(n.property, msg)
+	value, _ := node.EvalExprWithContext(ctx, n.property, msg)
 
-	// Build environment for expression evaluation
-	env := node.BuildExprEnv(msg)
+	// Build environment for expression evaluation (includes flow/node/global context)
+	env := node.BuildExprEnvWithContext(ctx, msg)
 	env["value"] = value
 
 	matched := false

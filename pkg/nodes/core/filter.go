@@ -70,8 +70,8 @@ func (n *FilterNode) Process(ctx context.Context, msg *message.Message, inputPor
 		return nil
 	}
 
-	// Build environment for expression evaluation
-	env := node.BuildExprEnv(msg)
+	// Build environment for expression evaluation (includes flow/node/global context)
+	env := node.BuildExprEnvWithContext(ctx, msg)
 
 	// Run the compiled expression
 	result, err := expr.Run(n.compiled, env)

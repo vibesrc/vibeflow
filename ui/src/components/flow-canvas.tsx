@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -10,6 +10,7 @@ import {
   type Edge,
   type Node,
   type NodeTypes,
+  type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -23,6 +24,7 @@ interface FlowCanvasProps {
   selectedNodeId: string | null;
   expandedNodes: Record<string, boolean>;
   errorNodeIds?: Set<string>;
+  initialViewport?: { x: number; y: number; zoom: number };
   onSelectNode: (id: string | null) => void;
   onUpdateNode: (id: string, updates: Partial<NodeDefinition>) => void;
   onDeleteNode: (id: string) => void;
@@ -30,6 +32,7 @@ interface FlowCanvasProps {
   onDeleteWire: (from: string, to: string, output: string, input: string) => void;
   onToggleNodeExpanded: (nodeId: string, expanded: boolean) => void;
   onNodeDoubleClick?: (nodeId: string) => void;
+  onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
   onDrop?: (x: number, y: number) => void;
 }
 
@@ -59,6 +62,7 @@ export function FlowCanvas({
   selectedNodeId,
   expandedNodes,
   errorNodeIds,
+  initialViewport,
   onSelectNode,
   onUpdateNode,
   onDeleteNode,
@@ -66,9 +70,39 @@ export function FlowCanvas({
   onDeleteWire,
   onToggleNodeExpanded,
   onNodeDoubleClick,
+  onViewportChange,
   onDrop,
 }: FlowCanvasProps) {
   const reactFlowInstance = useReactFlow();
+  const viewportInitialized = useRef(false);
+  const viewportDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Set initial viewport once after mount
+  useEffect(() => {
+    if (initialViewport && !viewportInitialized.current) {
+      viewportInitialized.current = true;
+      // Small delay to ensure ReactFlow is ready
+      setTimeout(() => {
+        reactFlowInstance.setViewport(initialViewport);
+      }, 50);
+    }
+  }, [initialViewport, reactFlowInstance]);
+
+  // Handle viewport changes with debounce
+  const handleMoveEnd = useCallback(
+    (_event: unknown, viewport: Viewport) => {
+      if (!onViewportChange) return;
+
+      // Debounce to avoid excessive localStorage writes
+      if (viewportDebounceRef.current) {
+        clearTimeout(viewportDebounceRef.current);
+      }
+      viewportDebounceRef.current = setTimeout(() => {
+        onViewportChange({ x: viewport.x, y: viewport.y, zoom: viewport.zoom });
+      }, 300);
+    },
+    [onViewportChange]
+  );
 
   // Stable callback ref to avoid re-renders
   const stableOnToggle = useStableCallback(onToggleNodeExpanded);
@@ -352,10 +386,11 @@ export function FlowCanvas({
         onSelectionChange={handleSelectionChange}
         onPaneClick={handlePaneClick}
         onNodeDoubleClick={handleNodeDoubleClick}
+        onMoveEnd={handleMoveEnd}
         nodeTypes={nodeTypes}
         snapToGrid
         snapGrid={[GRID_SIZE, GRID_SIZE]}
-        fitView
+        fitView={!initialViewport}
         fitViewOptions={{ padding: 0.2 }}
         defaultEdgeOptions={{
           type: 'default',

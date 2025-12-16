@@ -511,8 +511,24 @@ function SchemaConfigField({
         />
       ) : spec.format === 'code' ? (
         <CodeEditor
-          value={String(value ?? '')}
-          onChange={(v) => onChange(v)}
+          value={
+            typeof value === 'object' && value !== null
+              ? JSON.stringify(value, null, 2)
+              : String(value ?? '')
+          }
+          onChange={(v) => {
+            // For JSON language, try to parse the value
+            if (spec.language === 'json') {
+              try {
+                onChange(JSON.parse(v));
+              } catch {
+                // Keep as string while editing invalid JSON
+                onChange(v);
+              }
+            } else {
+              onChange(v);
+            }
+          }}
           language={spec.language || 'javascript'}
           height={150}
           label={spec.name}

@@ -41,11 +41,45 @@ wires: []
 
 const PANEL_STORAGE_KEY = 'vibeflow-editor-panels';
 const NODE_UI_STATE_KEY = 'vibeflow-node-ui-state';
+const EDITOR_STATE_KEY = 'vibeflow-editor-state';
 
 // Type for per-node UI state (can be extended later)
 type NodeUIState = {
   expanded?: boolean;
 };
+
+// Type for per-flow editor state
+type EditorState = {
+  activeTab?: string;
+  selectedNodeId?: string | null;
+  viewport?: { x: number; y: number; zoom: number };
+};
+
+// Get editor state for a flow
+function getEditorState(flowId: string): EditorState {
+  try {
+    const stored = localStorage.getItem(EDITOR_STATE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return parsed[flowId] ?? {};
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return {};
+}
+
+// Save editor state for a flow
+function saveEditorState(flowId: string, state: Partial<EditorState>) {
+  try {
+    const stored = localStorage.getItem(EDITOR_STATE_KEY);
+    const allState = stored ? JSON.parse(stored) : {};
+    allState[flowId] = { ...allState[flowId], ...state };
+    localStorage.setItem(EDITOR_STATE_KEY, JSON.stringify(allState));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 // Get expanded states for all nodes in a flow
 function getNodeUIState(flowId: string): Record<string, NodeUIState> {
@@ -103,7 +137,12 @@ export function FlowEditorPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // Load persisted editor state for this flow
+  const initialEditorState = useMemo(() => (id ? getEditorState(id) : {}), [id]);
+
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    initialEditorState.selectedNodeId ?? null
+  );
   const [initialFlowDef, setInitialFlowDef] = useState<FlowDefinition | null>(null);
   const {
     state: flowDefinition,
@@ -117,7 +156,31 @@ export function FlowEditorPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [errorNodeIds, setErrorNodeIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState('config');
+  const [activeTab, setActiveTabInternal] = useState(initialEditorState.activeTab ?? 'config');
+  const [initialViewport] = useState(initialEditorState.viewport);
+
+  // Persist selected node changes
+  const handleSelectNode = useCallback((nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+    if (id) {
+      saveEditorState(id, { selectedNodeId: nodeId });
+    }
+  }, [id]);
+
+  // Persist active tab changes
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabInternal(tab);
+    if (id) {
+      saveEditorState(id, { activeTab: tab });
+    }
+  }, [id]);
+
+  // Persist viewport changes (debounced via FlowCanvas)
+  const handleViewportChange = useCallback((viewport: { x: number; y: number; zoom: number }) => {
+    if (id) {
+      saveEditorState(id, { viewport });
+    }
+  }, [id]);
 
   // WebSocket for real-time events
   const handleFlowEvent = useCallback((event: WSEvent) => {
@@ -129,7 +192,14 @@ export function FlowEditorPage() {
     }
   }, []);
 
-  const { status: wsStatus, events: flowEvents, clearEvents } = useFlowEvents(id ?? null, handleFlowEvent);
+  const {
+    status: wsStatus,
+    events: flowEvents,
+    clearEvents,
+    isPaused,
+    pause: pauseEvents,
+    resume: resumeEvents,
+  } = useFlowEvents(id ?? null, { onEvent: handleFlowEvent });
 
   const defaultLayout = useMemo(() => getPanelLayout(), []);
 
@@ -174,6 +244,14 @@ export function FlowEditorPage() {
         const content = flow.content || DEFAULT_FLOW_CONTENT;
         const parsed = yaml.load(content) as FlowDefinition;
         setInitialFlowDef(parsed);
+
+        // Validate that persisted selectedNodeId exists in the flow
+        if (selectedNodeId && !parsed.nodes.some((n) => n.id === selectedNodeId)) {
+          setSelectedNodeId(null);
+          if (id) {
+            saveEditorState(id, { selectedNodeId: null });
+          }
+        }
       } catch (e) {
         console.error('Failed to parse flow content:', e);
         setInitialFlowDef({
@@ -183,7 +261,7 @@ export function FlowEditorPage() {
         });
       }
     }
-  }, [flow, initialFlowDef]);
+  }, [flow, initialFlowDef, selectedNodeId, id]);
 
   const updateMutation = useMutation({
     mutationFn: (data: { name?: string; content?: string }) => updateFlow(id!, data),
@@ -303,8 +381,8 @@ export function FlowEditorPage() {
       nodes: [...flowDefinition.nodes, newNode],
     });
     setHasUnsavedChanges(true);
-    setSelectedNodeId(newNode.id);
-  }, [flowDefinition]);
+    handleSelectNode(newNode.id);
+  }, [flowDefinition, handleSelectNode]);
 
   const handleDragStart = useCallback((_e: React.DragEvent, nodeType: NodeType) => {
     draggedNodeTypeRef.current = nodeType;
@@ -318,9 +396,9 @@ export function FlowEditorPage() {
   }, [handleAddNode]);
 
   const handleNodeDoubleClick = useCallback((nodeId: string) => {
-    setSelectedNodeId(nodeId);
+    handleSelectNode(nodeId);
     setActiveTab('config');
-  }, []);
+  }, [handleSelectNode, setActiveTab]);
 
   const handleUpdateNode = useCallback((nodeId: string, updates: Partial<NodeDefinition>) => {
     if (!flowDefinition) return;
@@ -344,9 +422,9 @@ export function FlowEditorPage() {
     });
     setHasUnsavedChanges(true);
     if (selectedNodeId === nodeId) {
-      setSelectedNodeId(null);
+      handleSelectNode(null);
     }
-  }, [flowDefinition, selectedNodeId]);
+  }, [flowDefinition, selectedNodeId, handleSelectNode]);
 
   const handleAddWire = useCallback((from: string, to: string, output?: string, input?: string) => {
     if (!flowDefinition) return;
@@ -590,13 +668,15 @@ export function FlowEditorPage() {
                   selectedNodeId={selectedNodeId}
                   expandedNodes={expandedNodes}
                   errorNodeIds={errorNodeIds}
-                  onSelectNode={setSelectedNodeId}
+                  initialViewport={initialViewport}
+                  onSelectNode={handleSelectNode}
                   onUpdateNode={handleUpdateNode}
                   onDeleteNode={handleDeleteNode}
                   onAddWire={handleAddWire}
                   onDeleteWire={handleDeleteWire}
                   onToggleNodeExpanded={handleToggleNodeExpanded}
                   onNodeDoubleClick={handleNodeDoubleClick}
+                  onViewportChange={handleViewportChange}
                   onDrop={handleCanvasDrop}
                 />
               </ReactFlowProvider>
@@ -624,6 +704,9 @@ export function FlowEditorPage() {
             flowEvents={flowEvents}
             wsStatus={wsStatus}
             onClearEvents={clearEvents}
+            isPaused={isPaused}
+            onPause={pauseEvents}
+            onResume={resumeEvents}
             nodes={flowDefinition?.nodes}
             activeTab={activeTab}
             onTabChange={setActiveTab}

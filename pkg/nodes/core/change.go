@@ -111,7 +111,7 @@ func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, inputPor
 			// If value is a string, try to evaluate it as an expression
 			val := rule.value
 			if s, ok := val.(string); ok && s != "" {
-				if evaluated, err := node.EvalExpr(s, out); err == nil {
+				if evaluated, err := node.EvalExprWithContext(ctx, s, out); err == nil {
 					val = evaluated
 				}
 			}
@@ -120,13 +120,13 @@ func (n *ChangeNode) Process(ctx context.Context, msg *message.Message, inputPor
 			n.deleteProperty(out, rule.property)
 		case "move":
 			if rule.from != "" {
-				val, _ := node.EvalExpr(rule.from, out)
+				val, _ := node.EvalExprWithContext(ctx, rule.from, out)
 				n.setProperty(out, rule.property, val)
 				n.deleteProperty(out, rule.from)
 			}
 		case "copy":
 			if rule.from != "" {
-				val, _ := node.EvalExpr(rule.from, out)
+				val, _ := node.EvalExprWithContext(ctx, rule.from, out)
 				n.setProperty(out, rule.property, val)
 			}
 		}

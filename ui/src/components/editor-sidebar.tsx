@@ -2,10 +2,11 @@ import { useState } from 'react';
 import type { NodeDefinition, NodeType } from '@/api';
 import type { WSEvent, ConnectionStatus } from '@/hooks/use-websocket';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Variable, Bug } from 'lucide-react';
+import { Settings, Variable, Bug, Braces } from 'lucide-react';
 import { NodeConfigPanel } from '@/components/node-config-panel';
 import { EnvPanel } from '@/components/env-panel';
 import { DebugPanel } from '@/components/debug-panel';
+import { VariablesPanel } from '@/components/variables-panel';
 
 interface EditorSidebarProps {
   // Config tab
@@ -21,6 +22,9 @@ interface EditorSidebarProps {
   flowEvents: WSEvent[];
   wsStatus: ConnectionStatus;
   onClearEvents: () => void;
+  isPaused: boolean;
+  onPause: () => void;
+  onResume: () => void;
   nodes?: NodeDefinition[];
   // Tab control (optional external control)
   activeTab?: string;
@@ -38,6 +42,9 @@ export function EditorSidebar({
   flowEvents,
   wsStatus,
   onClearEvents,
+  isPaused,
+  onPause,
+  onResume,
   nodes,
   activeTab: externalActiveTab,
   onTabChange,
@@ -58,6 +65,10 @@ export function EditorSidebar({
         <TabsTrigger value="env" className="text-xs gap-1.5">
           <Variable className="w-3.5 h-3.5" />
           Env
+        </TabsTrigger>
+        <TabsTrigger value="vars" className="text-xs gap-1.5">
+          <Braces className="w-3.5 h-3.5" />
+          Vars
         </TabsTrigger>
         <TabsTrigger value="debug" className="text-xs gap-1.5">
           <Bug className="w-3.5 h-3.5" />
@@ -93,11 +104,18 @@ export function EditorSidebar({
         />
       </TabsContent>
 
+      <TabsContent value="vars" className="flex-1 m-0 overflow-hidden">
+        <VariablesPanel events={flowEvents} />
+      </TabsContent>
+
       <TabsContent value="debug" className="flex-1 m-0 overflow-hidden">
         <DebugPanel
           events={flowEvents}
           wsStatus={wsStatus}
           onClear={onClearEvents}
+          isPaused={isPaused}
+          onPause={onPause}
+          onResume={onResume}
           nodes={nodes}
         />
       </TabsContent>

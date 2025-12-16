@@ -18,7 +18,9 @@ func init() {
 		Inputs:      []node.PortInfo{}, // No inputs - inject is a source node
 		Outputs:     []node.PortInfo{{Name: "default", Description: "Injected message"}},
 		Config: []node.ConfigSpec{
-			{Name: "payload", Type: "object", Description: "Payload to inject"},
+			{Name: "payload_type", Type: "string", Default: "json", Options: []any{"json", "expr"}, Description: "Payload type: static JSON or expression"},
+			{Name: "payload", Type: "object", Format: "code", Language: "json", Description: "Static JSON payload", ShowWhen: &node.ShowWhen{Field: "payload_type", Eq: "json"}},
+			{Name: "payload_expr", Type: "string", Format: "expression", Description: "Expression for dynamic payload (e.g., now(), flow.get(\"counter\"))", ShowWhen: &node.ShowWhen{Field: "payload_type", Eq: "expr"}},
 			{Name: "on_start", Type: "bool", Default: true, Description: "Inject on flow start"},
 			{Name: "repeat", Type: "bool", Default: true, Description: "Repeat at interval"},
 			{Name: "interval_ms", Type: "int", Default: 1000, Description: "Interval in milliseconds", ShowWhen: &node.ShowWhen{Field: "repeat", Eq: true}},
@@ -29,11 +31,13 @@ func init() {
 
 // InjectNode injects messages on a timer or at startup.
 type InjectNode struct {
-	id         string
-	payload    any
-	intervalMS int
-	onStart    bool
-	repeat     bool
+	id          string
+	payloadType string // "json" or "expr"
+	payload     any    // static payload (for json type)
+	payloadExpr string // expression (for expr type)
+	intervalMS  int
+	onStart     bool
+	repeat      bool
 
 	output node.Output
 	ticker *time.Ticker
@@ -42,10 +46,12 @@ type InjectNode struct {
 
 func (n *InjectNode) Init(ctx context.Context, cfg *node.Config, inputs node.Inputs, outputs node.Outputs) error {
 	n.id = cfg.ID
+	n.payloadType = cfg.GetString("payload_type", "json")
 	n.payload = cfg.Get("payload")
 	if n.payload == nil {
 		n.payload = map[string]any{}
 	}
+	n.payloadExpr = cfg.GetString("payload_expr", "")
 	n.intervalMS = cfg.GetInt("interval_ms", 0)
 	n.onStart = cfg.GetBool("on_start", true)
 	n.repeat = cfg.GetBool("repeat", true)
@@ -70,10 +76,7 @@ func (n *InjectNode) Start(ctx context.Context) error {
 
 	// Inject on start if configured
 	if n.onStart {
-		msg := message.New(n.payload)
-		msg.SetMeta("source", n.id)
-		msg.SetTimestamp()
-		n.output.Send(msg)
+		n.sendMessage(ctx, nil)
 	}
 
 	// Start timer if interval is set
@@ -94,10 +97,7 @@ func (n *InjectNode) tickLoop(ctx context.Context) {
 			return
 		case <-n.ticker.C:
 			if n.output != nil {
-				msg := message.New(n.payload)
-				msg.SetMeta("source", n.id)
-				msg.SetTimestamp()
-				n.output.Send(msg)
+				n.sendMessage(ctx, nil)
 			}
 		}
 	}
@@ -108,12 +108,38 @@ func (n *InjectNode) Process(ctx context.Context, msg *message.Message, inputPor
 		return nil
 	}
 	// Inject nodes can also be triggered by incoming messages
-	newMsg := message.New(n.payload)
-	newMsg.SetMeta("source", n.id)
-	newMsg.SetMeta("triggered_by", msg.ID)
-	newMsg.SetTimestamp()
-	n.output.Send(newMsg)
+	n.sendMessage(ctx, msg)
 	return nil
+}
+
+// sendMessage builds and sends an inject message.
+// triggeredBy is optional - set when triggered by an incoming message.
+func (n *InjectNode) sendMessage(ctx context.Context, triggeredBy *message.Message) {
+	payload := n.buildPayload(ctx)
+	msg := message.New(payload)
+	msg.SetMeta("source", n.id)
+	msg.SetTimestamp()
+	if triggeredBy != nil {
+		msg.SetMeta("triggered_by", triggeredBy.ID)
+	}
+	n.output.Send(msg)
+}
+
+// buildPayload returns the payload based on payload_type.
+func (n *InjectNode) buildPayload(ctx context.Context) any {
+	if n.payloadType == "expr" && n.payloadExpr != "" {
+		// Evaluate expression with context (for flow.get, node.get, global.get, now(), etc.)
+		// Use an empty message as base since inject doesn't have an incoming message
+		emptyMsg := message.New(nil)
+		result, err := node.EvalExprWithContext(ctx, n.payloadExpr, emptyMsg)
+		if err != nil {
+			// Return the error as the payload so user can debug
+			return map[string]any{"error": err.Error(), "expression": n.payloadExpr}
+		}
+		return result
+	}
+	// Default: static JSON payload
+	return n.payload
 }
 
 func (n *InjectNode) Stop(ctx context.Context) error {

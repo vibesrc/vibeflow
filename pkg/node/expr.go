@@ -8,37 +8,34 @@ import (
 	"github.com/expr-lang/expr"
 )
 
-// contextWrapper wraps a ContextAccessor to provide expr-friendly access.
+// createContextAccessorMap creates a map with lowercase keys for expr-lang access.
 // Supports: get(key), set(key, value), delete(key), keys()
-type contextWrapper struct {
-	accessor ContextAccessor
-}
-
-func (c *contextWrapper) Get(key string) any {
-	if c.accessor == nil {
-		return nil
+func createContextAccessorMap(accessor ContextAccessor) map[string]any {
+	return map[string]any{
+		"get": func(key string) any {
+			if accessor == nil {
+				return nil
+			}
+			val, _ := accessor.Get(key)
+			return val
+		},
+		"set": func(key string, value any) {
+			if accessor != nil {
+				accessor.Set(key, value)
+			}
+		},
+		"delete": func(key string) {
+			if accessor != nil {
+				accessor.Delete(key)
+			}
+		},
+		"keys": func() []string {
+			if accessor == nil {
+				return nil
+			}
+			return accessor.Keys()
+		},
 	}
-	val, _ := c.accessor.Get(key)
-	return val
-}
-
-func (c *contextWrapper) Set(key string, value any) {
-	if c.accessor != nil {
-		c.accessor.Set(key, value)
-	}
-}
-
-func (c *contextWrapper) Delete(key string) {
-	if c.accessor != nil {
-		c.accessor.Delete(key)
-	}
-}
-
-func (c *contextWrapper) Keys() []string {
-	if c.accessor == nil {
-		return nil
-	}
-	return c.accessor.Keys()
 }
 
 // BuildExprEnv creates the standard environment for expr evaluation.
@@ -62,10 +59,10 @@ func BuildExprEnv(msg *message.Message) map[string]any {
 func BuildExprEnvWithContext(ctx context.Context, msg *message.Message) map[string]any {
 	env := BuildExprEnv(msg)
 
-	// Add context accessors if available
-	env["flow"] = &contextWrapper{accessor: GetFlowContext(ctx)}
-	env["node"] = &contextWrapper{accessor: GetNodeContext(ctx)}
-	env["global"] = &contextWrapper{accessor: GetGlobalContext(ctx)}
+	// Add context accessors if available (lowercase methods: get, set, delete, keys)
+	env["flow"] = createContextAccessorMap(GetFlowContext(ctx))
+	env["node"] = createContextAccessorMap(GetNodeContext(ctx))
+	env["global"] = createContextAccessorMap(GetGlobalContext(ctx))
 
 	return env
 }
@@ -99,6 +96,18 @@ func EvalExprWithContext(ctx context.Context, expression string, msg *message.Me
 // EvalExprString evaluates an expression and returns the result as a string.
 func EvalExprString(expression string, msg *message.Message) string {
 	result, err := EvalExpr(expression, msg)
+	if err != nil || result == nil {
+		return ""
+	}
+	if s, ok := result.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", result)
+}
+
+// EvalExprStringWithContext evaluates an expression with context and returns the result as a string.
+func EvalExprStringWithContext(ctx context.Context, expression string, msg *message.Message) string {
+	result, err := EvalExprWithContext(ctx, expression, msg)
 	if err != nil || result == nil {
 		return ""
 	}
